@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Application Layer Dashboard</title>
+
+    <!--
+        Flask automatically serves anything inside the static/ folder
+        at the URL path /static/...
+        url_for('static', filename='...') builds that path for us,
+        so we never have to hardcode "/static/css/style.css" by hand.
+    -->
+    <!-- Google Fonts: a serif for headings (Newsreader) and a sans-serif for body/UI text (Inter) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Newsreader:wght@500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+
+    <!-- ============ TOP HEADER BAR ============ -->
+    <header class="site-header">
+        <div class="site-header__title">
+            <h1>Application Layer Dashboard</h1>
+            <p>Dual-Panel Activity &amp; Protocol Visualizer</p>
+        </div>
+        <div class="site-header__course">
+            <span>Computer Networks</span>
+        </div>
+    </header>
+
+    <!--
+        ============ MAIN DASHBOARD ============
+        This is the required two-panel layout:
+            - .panel--activity   (LEFT)  : user performs an action
+            - .panel--protocol   (RIGHT) : protocol messages appear
+
+        Both panels live inside .dashboard, which uses CSS Grid
+        to place them side-by-side on desktop and stacked on mobile
+        (see style.css for the responsive rule).
+    -->
+    <main class="dashboard">
+
+        <!-- LEFT PANEL: ACTIVITY PANEL -->
+        <section class="panel panel--activity" aria-label="Activity Panel">
+            <div class="panel__header">
+                <span class="panel__tag panel__tag--activity">Activity</span>
+                <h2>Choose an action</h2>
+            </div>
+
+            <div class="panel__body">
+                <!--
+                    Activity selector: lets the user switch which form is
+                    shown below, WITHOUT adding a third panel. Only one
+                    of the three ".activity-form-panel" blocks is visible
+                    at a time -- activity_panel.js toggles the
+                    "activity-form-panel--hidden" class on click, and also
+                    clears the right-hand Protocol panel back to its
+                    placeholder (Visualizer.reset()) so a stale sequence
+                    from the previously selected activity never lingers.
+
+                    Basic ARIA tab pattern (role="tab"/aria-selected,
+                    role="tabpanel") is used so screen readers announce
+                    which activity is currently selected.
+                -->
+                <div class="activity-tabs" role="tablist" aria-label="Choose an activity">
+                    <button type="button" class="activity-tab activity-tab--active" role="tab" aria-selected="true" aria-controls="browsing-panel" data-activity="browsing" id="tab-browsing">Browsing</button>
+                    <button type="button" class="activity-tab" role="tab" aria-selected="false" aria-controls="mail-panel" data-activity="mail" id="tab-mail">Mail</button>
+                    <button type="button" class="activity-tab" role="tab" aria-selected="false" aria-controls="streaming-panel" data-activity="streaming" id="tab-streaming">Streaming</button>
+                </div>
+
+                <!-- Browsing form with Simulation/Live mode selector -->
+                <div class="activity-form-panel" id="browsing-panel" role="tabpanel" aria-labelledby="tab-browsing">
+                    <form id="browsing-form" class="activity-form" autocomplete="off">
+                        <!--
+                            Simulation/Live selector: Simulation (default) uses the
+                            existing offline dns_sim.py/http_sim.py, unchanged. Live
+                            performs a REAL DNS lookup followed by a REAL HTTP/HTTPS
+                            GET request (see live/dns_live.py and live/http_live.py).
+                        -->
+                        <div class="mode-toggle" role="radiogroup" aria-label="Browsing mode">
+                            <label class="mode-toggle__option">
+                                <input type="radio" name="browsing-mode" value="simulation" checked>
+                                Simulation
+                            </label>
+                            <label class="mode-toggle__option">
+                                <input type="radio" name="browsing-mode" value="live">
+                                Live (real DNS + HTTP)
+                            </label>
+                        </div>
+
+                        <label for="url-input">Website URL</label>
+                        <div class="activity-form__row">
+                            <input
+                                type="text"
+                                id="url-input"
+                                name="url"
+                                placeholder="e.g. example.com"
+                            >
+                            <button type="submit" id="visit-button">Visit</button>
+                        </div>
+
+                        <!-- Browser preview container (Live Browsing only, contained inside Activity Panel) -->
+                        <div id="browser-preview-container" class="browser-preview-container browser-preview-container--hidden">
+                            <div class="browser-preview__chrome">
+                                <div class="browser-preview__dots">
+                                    <span class="browser-preview__dot"></span>
+                                    <span class="browser-preview__dot"></span>
+                                    <span class="browser-preview__dot"></span>
+                                </div>
+                                <span id="browser-preview-address" class="browser-preview__address">about:blank</span>
+                                <button type="button" id="btn-toggle-fallback" class="browser-preview__btn-info" title="Toggle embedding explanation">Notice</button>
+                            </div>
+                            <div class="browser-preview__viewport">
+                                <iframe id="browser-preview-iframe" sandbox="allow-scripts allow-same-origin allow-forms" title="Browser Preview"></iframe>
+                                <div id="browser-preview-fallback" class="browser-preview__fallback browser-preview__fallback--hidden">
+                                    <p class="browser-preview__fallback-title">Preview unavailable &mdash; this website does not allow embedding.</p>
+                                    <p class="browser-preview__fallback-desc">Sites that send <code>X-Frame-Options: DENY/SAMEORIGIN</code> or <code>Content-Security-Policy: frame-ancestors</code> restrict embedding in iframes. The protocol visualization on the right reflects the real HTTP/HTTPS network exchange.</p>
+                                    <a id="browser-preview-link" href="#" target="_blank" rel="noopener noreferrer" class="browser-preview__ext-link">Open website in new tab &nearr;</a>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Mail form (Phase 2 + Live SMTP submission) -->
+                <div class="activity-form-panel activity-form-panel--hidden" id="mail-panel" role="tabpanel" aria-labelledby="tab-mail">
+                    <form id="mail-form" class="activity-form" autocomplete="off">
+                        <!-- Simulation/Live selector for Mail -->
+                        <div class="mode-toggle" role="radiogroup" aria-label="Mail mode">
+                            <label class="mode-toggle__option">
+                                <input type="radio" name="mail-mode" value="simulation" checked>
+                                Simulation
+                            </label>
+                            <label class="mode-toggle__option">
+                                <input type="radio" name="mail-mode" value="live">
+                                Live (real SMTP)
+                            </label>
+                        </div>
+
+                        <div class="field-group">
+                            <label for="mail-to">To</label>
+                            <input type="text" id="mail-to" name="to" placeholder="e.g. alice@example.com">
+                        </div>
+                        <div class="field-group">
+                            <label for="mail-subject">Subject</label>
+                            <input type="text" id="mail-subject" name="subject" placeholder="e.g. Project update">
+                        </div>
+                        <div class="field-group">
+                            <label for="mail-body">Body</label>
+                            <textarea id="mail-body" name="body" rows="4" placeholder="Write your message..."></textarea>
+                        </div>
+                        <button type="submit" id="send-button" class="activity-form__submit">Send</button>
+                    </form>
+                </div>
+
+                <!-- Streaming form (Phase 3 + Live HLS playback) -->
+                <div class="activity-form-panel activity-form-panel--hidden" id="streaming-panel" role="tabpanel" aria-labelledby="tab-streaming">
+                    <form id="streaming-form" class="activity-form" autocomplete="off">
+                        <!-- Simulation/Live selector for Streaming -->
+                        <div class="mode-toggle" role="radiogroup" aria-label="Streaming mode">
+                            <label class="mode-toggle__option">
+                                <input type="radio" name="streaming-mode" value="simulation" checked>
+                                Simulation
+                            </label>
+                            <label class="mode-toggle__option">
+                                <input type="radio" name="streaming-mode" value="live">
+                                Live (real HLS playback)
+                            </label>
+                        </div>
+
+                        <div class="field-group" id="streaming-url-group" style="display: none;">
+                            <label for="streaming-url">HLS Stream URL (.m3u8)</label>
+                            <input
+                                type="text"
+                                id="streaming-url"
+                                name="stream_url"
+                                value="https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8"
+                                placeholder="https://.../playlist.m3u8"
+                            >
+                            <p class="field-note">Configurable HLS source. Default is a public multi-bitrate test stream with CORS enabled.</p>
+                        </div>
+
+                        <div class="field-group">
+                            <label for="streaming-quality">Quality</label>
+                            <select id="streaming-quality" name="quality">
+                                <option value="360p">360p</option>
+                                <option value="720p" selected>720p</option>
+                                <option value="1080p">1080p</option>
+                            </select>
+                        </div>
+
+                        <button type="submit" id="play-button" class="activity-form__submit">Play</button>
+
+                        <!-- Live Video Player (Live Streaming only, contained inside Activity Panel) -->
+                        <div id="live-video-container" class="live-video-container live-video-container--hidden">
+                            <video id="live-video-player" controls playsinline></video>
+                            <div id="live-video-error" class="live-video-error live-video-error--hidden"></div>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Status text: tells the user what just happened / went wrong -->
+                <p id="activity-status" class="activity-status" role="status">
+                    Enter a URL and click Visit to begin.
+                </p>
+
+                <!-- Activity log: a running history of actions taken so far -->
+                <div class="activity-log">
+                    <h3>Activity Log</h3>
+                    <ul id="activity-log-list" class="activity-log__list">
+                        <li class="activity-log__empty">Nothing has happened yet.</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+        <!-- RIGHT PANEL: PROTOCOL VISUALIZATION PANEL -->
+        <section class="panel panel--protocol" aria-label="Protocol Visualization Panel">
+            <div class="panel__header">
+                <span class="panel__tag panel__tag--protocol">Protocol</span>
+                <h2>Message exchange</h2>
+            </div>
+
+            <div class="panel__body">
+                <!-- Shows "Step X of Y" so the user always knows their position -->
+                <div class="protocol-step-indicator" id="protocol-step-indicator">
+                    Step 0 of 0
+                </div>
+
+                <!--
+                    This box is filled in by visualizer.js (renderEvent()).
+                    It starts with a placeholder message and gets replaced
+                    with the current protocol event's details once an
+                    activity has been performed.
+                -->
+                <div class="protocol-event" id="protocol-event">
+                    <p class="placeholder-note">
+                        Waiting for an activity on the left panel&hellip;
+                    </p>
+                </div>
+
+                <!-- Playback controls: operate only on already-fetched events -->
+                <div class="playback-controls" aria-label="Playback controls">
+                    <button type="button" id="btn-previous" disabled>&#9664;&#9664; Previous</button>
+                    <button type="button" id="btn-pause" disabled>&#10074;&#10074; Pause</button>
+                    <button type="button" id="btn-next" disabled>Next &#9654;&#9654;</button>
+                    <button type="button" id="btn-replay" disabled>&#8635; Replay</button>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <footer class="site-footer">
+        <p>Built with Flask &middot; Simulation + Live networking supported</p>
+    </footer>
+
+    <!-- HLS.js for cross-browser HTTP Live Streaming playback -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <script src="{{ url_for('static', filename='js/visualizer.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/activity_panel.js') }}"></script>
+</body>
+</html>

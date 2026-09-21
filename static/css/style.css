@@ -1,0 +1,707 @@
+/* =============================================================
+   style.css
+   ---------
+   Styling for the Dual-Panel Activity & Protocol Visualizer.
+
+   Design idea: the two panels represent the two sides of every
+   network exchange -- the CLIENT (left, "Activity") and what
+   travels across the wire (right, "Protocol"). Each side gets
+   its own accent color used consistently (steel blue = activity,
+   signal green = protocol), so as the project grows, a user can
+   tell at a glance which panel/message belongs to which side.
+
+   Protocol message text will use a monospace font later, because
+   that is how terminals/network tools conventionally display
+   raw protocol data -- it's functional, not decorative.
+   ============================================================= */
+
+/* ---------- Design tokens ---------- */
+:root {
+    /* Base surfaces */
+    --color-bg: #F4F6F7;
+    --color-panel: #FFFFFF;
+    --color-border: #DCE3E8;
+
+    /* Text */
+    --color-ink: #1C2733;
+    --color-ink-soft: #5B6B7A;
+
+    /* Side accents */
+    --color-activity: #2C6E9B;      /* steel blue: client / user action side */
+    --color-activity-tint: #EAF2F7;
+    --color-protocol: #2F8F6F;      /* signal green: protocol / wire side */
+    --color-protocol-tint: #EAF5F0;
+    --color-smtp: #B76E2A;          /* amber: SMTP messages, distinct from DNS/HTTP */
+
+    /* Layout */
+    --radius: 10px;
+    --gap: 1.5rem;
+
+    /* Monospace, used only for raw protocol message text (DNS/HTTP/SMTP) --
+       this mirrors how terminals and network tools display protocol data. */
+    --font-mono: "JetBrains Mono", "Courier New", monospace;
+}
+
+/* ---------- Reset & base ---------- */
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: var(--color-bg);
+    color: var(--color-ink);
+    font-family: "Inter", "Segoe UI", Arial, sans-serif;
+    line-height: 1.5;
+}
+
+h1, h2, h3 {
+    font-family: "Newsreader", Georgia, serif;
+    font-weight: 600;
+    margin: 0;
+}
+
+/* ---------- Top header bar ---------- */
+.site-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    padding: 1.75rem 2rem 1.25rem;
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-panel);
+}
+
+.site-header__title h1 {
+    font-size: 1.65rem;
+    letter-spacing: -0.01em;
+}
+
+.site-header__title p {
+    margin: 0.25rem 0 0;
+    color: var(--color-ink-soft);
+    font-size: 0.95rem;
+}
+
+.site-header__course span {
+    font-size: 0.85rem;
+    color: var(--color-ink-soft);
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    padding: 0.3rem 0.85rem;
+    white-space: nowrap;
+}
+
+/* ---------- Dashboard grid: THE TWO-PANEL LAYOUT ----------
+   This is the core requirement: exactly two panels, side by side
+   on desktop. "grid-template-columns: 1fr 1fr" gives them equal
+   width. On small screens (see media query below) this switches
+   to a single column, so panels stack vertically instead.
+------------------------------------------------------------- */
+.dashboard {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--gap);
+    max-width: 1200px;
+    margin: 2rem auto;
+    padding: 0 2rem;
+}
+
+/* ---------- Shared panel styling ---------- */
+.panel {
+    background: var(--color-panel);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    display: flex;
+    flex-direction: column;
+    min-height: 480px;
+    overflow: hidden;
+}
+
+/* A colored top edge identifies which side of the exchange
+   this panel represents -- steel blue for activity/client,
+   signal green for protocol/wire. */
+.panel--activity {
+    border-top: 3px solid var(--color-activity);
+}
+
+.panel--protocol {
+    border-top: 3px solid var(--color-protocol);
+}
+
+.panel__header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 1.25rem 1.5rem;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.panel__header h2 {
+    font-size: 1.15rem;
+}
+
+.panel__tag {
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.2rem 0.6rem;
+    border-radius: 999px;
+}
+
+.panel__tag--activity {
+    color: var(--color-activity);
+    background: var(--color-activity-tint);
+}
+
+.panel__tag--protocol {
+    color: var(--color-protocol);
+    background: var(--color-protocol-tint);
+}
+
+.panel__body {
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    flex: 1;
+}
+
+/* ---------- Activity tabs (choosing Browsing / Mail / Streaming) ---------- */
+.activity-tabs {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 0.25rem;
+}
+
+.activity-tab {
+    font-family: inherit;
+    font-size: 0.85rem;
+    font-weight: 600;
+    padding: 0.45rem 0.9rem;
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    background: var(--color-panel);
+    color: var(--color-ink-soft);
+    cursor: pointer;
+}
+
+.activity-tab:hover {
+    border-color: var(--color-activity);
+}
+
+.activity-tab--active {
+    background: var(--color-activity);
+    border-color: var(--color-activity);
+    color: #fff;
+}
+
+.activity-form-panel--hidden {
+    display: none;
+}
+
+/* ---------- Browsing form (left panel, Phase 1) ---------- */
+.activity-form label {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--color-ink-soft);
+    margin-bottom: 0.4rem;
+}
+
+/* ---------- Simulation/Live mode selector (Live Phase 1) ---------- */
+.mode-toggle {
+    display: flex;
+    gap: 1.25rem;
+    margin-bottom: 1rem;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--color-ink-soft);
+}
+
+.mode-toggle__option {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    cursor: pointer;
+}
+
+.mode-toggle__option input {
+    accent-color: var(--color-activity);
+    cursor: pointer;
+}
+
+.activity-form__row {
+    display: flex;
+    gap: 0.6rem;
+}
+
+.activity-form__row input {
+    flex: 1;
+    font-family: inherit;
+    font-size: 0.95rem;
+    padding: 0.6rem 0.75rem;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    background: var(--color-bg);
+    color: var(--color-ink);
+}
+
+.activity-form__row input:focus {
+    outline: 2px solid var(--color-activity);
+    outline-offset: 1px;
+}
+
+.activity-form__row button {
+    font-family: inherit;
+    font-size: 0.9rem;
+    font-weight: 600;
+    padding: 0.6rem 1.1rem;
+    border: none;
+    border-radius: 6px;
+    background: var(--color-activity);
+    color: #fff;
+    cursor: pointer;
+}
+
+.activity-form__row button:hover {
+    background: #235a80;
+}
+
+.activity-form__row button:disabled {
+    background: var(--color-border);
+    cursor: not-allowed;
+}
+
+/* Status line beneath the form: shows progress / errors */
+.activity-status {
+    margin: 0;
+    font-size: 0.9rem;
+    color: var(--color-ink-soft);
+}
+
+.activity-status--error {
+    color: #B3412E;
+}
+
+/* ---------- Mail form (left panel, Phase 2) ----------
+   Stacked label-above-field layout, unlike Browsing's single
+   horizontal row -- kept in its own class (.field-group) so it
+   doesn't interfere with .activity-form__row's flex layout above. */
+.field-group {
+    margin-bottom: 0.9rem;
+}
+
+.field-group label {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--color-ink-soft);
+    margin-bottom: 0.4rem;
+}
+
+.field-group input,
+.field-group select,
+.field-group textarea {
+    width: 100%;
+    font-family: inherit;
+    font-size: 0.95rem;
+    padding: 0.6rem 0.75rem;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    background: var(--color-bg);
+    color: var(--color-ink);
+    resize: vertical;
+}
+
+.field-group input:focus,
+.field-group select:focus,
+.field-group textarea:focus {
+    outline: 2px solid var(--color-activity);
+    outline-offset: 1px;
+}
+
+.activity-form__submit {
+    font-family: inherit;
+    font-size: 0.9rem;
+    font-weight: 600;
+    padding: 0.6rem 1.1rem;
+    border: none;
+    border-radius: 6px;
+    background: var(--color-activity);
+    color: #fff;
+    cursor: pointer;
+}
+
+.activity-form__submit:hover {
+    background: #235a80;
+}
+
+.activity-form__submit:disabled {
+    background: var(--color-border);
+    cursor: not-allowed;
+}
+
+.field-note {
+    margin: 0.35rem 0 0;
+    font-size: 0.78rem;
+    color: var(--color-ink-soft);
+}
+
+/* ---------- Browser Preview Container (Live Browsing) ---------- */
+.browser-preview-container {
+    margin-top: 1rem;
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    background: var(--color-bg);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.browser-preview-container--hidden {
+    display: none;
+}
+
+.browser-preview__chrome {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.45rem 0.75rem;
+    background: #E8EEF3;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.browser-preview__dots {
+    display: flex;
+    gap: 0.3rem;
+}
+
+.browser-preview__dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #CBD5E1;
+}
+
+.browser-preview__chrome .browser-preview__dot:nth-child(1) { background: #F87171; }
+.browser-preview__chrome .browser-preview__dot:nth-child(2) { background: #FBBF24; }
+.browser-preview__chrome .browser-preview__dot:nth-child(3) { background: #34D399; }
+
+.browser-preview__address {
+    flex: 1;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--color-ink-soft);
+    background: #fff;
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    border: 1px solid var(--color-border);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.browser-preview__viewport {
+    position: relative;
+    width: 100%;
+    height: 240px;
+    background: #fff;
+}
+
+.browser-preview__viewport iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+    display: block;
+}
+
+.browser-preview__fallback {
+    position: absolute;
+    inset: 0;
+    background: #FBFDFE;
+    padding: 1rem 1.25rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    color: var(--color-ink);
+    border: 1px dashed var(--color-border);
+}
+
+.browser-preview__fallback--hidden {
+    display: none;
+}
+
+.browser-preview__fallback-title {
+    font-weight: 600;
+    font-size: 0.88rem;
+    margin: 0 0 0.4rem;
+    color: #92400E;
+}
+
+.browser-preview__fallback-desc {
+    font-size: 0.8rem;
+    color: var(--color-ink-soft);
+    line-height: 1.4;
+    margin: 0;
+    max-width: 380px;
+}
+
+.browser-preview__fallback-desc code {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    background: #F1F5F9;
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+}
+
+.browser-preview__btn-info {
+    font-family: inherit;
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: var(--color-ink-soft);
+    background: #fff;
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    padding: 0.15rem 0.45rem;
+    cursor: pointer;
+}
+
+.browser-preview__btn-info:hover {
+    border-color: var(--color-activity);
+    color: var(--color-activity);
+}
+
+.browser-preview__ext-link {
+    display: inline-block;
+    margin-top: 0.6rem;
+    font-size: 0.78rem;
+    color: var(--color-activity);
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.browser-preview__ext-link:hover {
+    text-decoration: underline;
+}
+
+/* ---------- Live Video Container (Live Streaming) ---------- */
+.live-video-container {
+    margin-top: 1rem;
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    background: #000;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.live-video-container--hidden {
+    display: none;
+}
+
+.live-video-container video {
+    width: 100%;
+    max-height: 240px;
+    display: block;
+    background: #000;
+}
+
+.live-video-error {
+    background: #FEF2F2;
+    color: #991B1B;
+    padding: 0.6rem 0.85rem;
+    font-size: 0.82rem;
+    border-top: 1px solid #FCA5A5;
+}
+
+.live-video-error--hidden {
+    display: none;
+}
+
+/* ---------- Protocol event display (right panel, Phase 1) ---------- */
+.protocol-step-indicator {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--color-protocol);
+    letter-spacing: 0.02em;
+}
+
+.protocol-event {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.protocol-message {
+    border: 1px solid var(--color-border);
+    border-left: 4px solid var(--color-protocol);
+    border-radius: var(--radius);
+    padding: 1.1rem 1.25rem;
+    background: var(--color-protocol-tint);
+}
+
+/* Client-to-server events lean on the blue "activity" accent instead,
+   so the left border color always tells you which direction a message
+   traveled, matching the two panels' colors. */
+.protocol-message--client-to-server {
+    border-left-color: var(--color-activity);
+    background: var(--color-activity-tint);
+}
+
+.protocol-message__meta {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-bottom: 0.6rem;
+    font-size: 0.8rem;
+    color: var(--color-ink-soft);
+}
+
+.protocol-badge {
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    color: #fff;
+}
+
+.protocol-badge--dns {
+    background: var(--color-protocol);
+}
+
+.protocol-badge--http {
+    background: var(--color-activity);
+}
+
+.protocol-badge--smtp {
+    background: var(--color-smtp);
+}
+
+.protocol-message__summary {
+    font-size: 1.05rem;
+    margin: 0 0 0.6rem;
+}
+
+.protocol-message__raw {
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+    background: var(--color-panel);
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    padding: 0.75rem 0.9rem;
+    margin: 0 0 0.75rem;
+}
+
+.protocol-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+.protocol-field {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.85rem;
+    padding: 0.15rem 0;
+}
+
+.protocol-field__key {
+    color: var(--color-ink-soft);
+}
+
+.protocol-field__value {
+    font-family: var(--font-mono);
+}
+
+.protocol-field--highlight .protocol-field__key,
+.protocol-field--highlight .protocol-field__value {
+    color: var(--color-ink);
+    font-weight: 600;
+}
+
+/* ---------- Placeholder content (still used before first activity) ---------- */
+.placeholder-note {
+    color: var(--color-ink-soft);
+    font-size: 0.9rem;
+    margin: 0;
+}
+
+/* ---------- Activity log (left panel) ---------- */
+.activity-log h3 {
+    font-size: 0.95rem;
+    margin-bottom: 0.5rem;
+}
+
+.activity-log__list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    font-size: 0.9rem;
+    color: var(--color-ink-soft);
+}
+
+.activity-log__empty {
+    font-style: italic;
+}
+
+/* ---------- Playback controls (right panel) ---------- */
+.playback-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    border-top: 1px solid var(--color-border);
+    padding-top: 1.25rem;
+}
+
+.playback-controls button {
+    font-family: inherit;
+    font-size: 0.85rem;
+    padding: 0.5rem 0.85rem;
+    border-radius: 6px;
+    border: 1px solid var(--color-border);
+    background: var(--color-bg);
+    color: var(--color-ink);
+    cursor: pointer;
+}
+
+.playback-controls button:hover:not(:disabled) {
+    border-color: var(--color-protocol);
+    color: var(--color-protocol);
+}
+
+.playback-controls button:disabled {
+    color: var(--color-ink-soft);
+    background: var(--color-bg);
+    border-color: var(--color-border);
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* ---------- Footer ---------- */
+.site-footer {
+    text-align: center;
+    color: var(--color-ink-soft);
+    font-size: 0.8rem;
+    padding: 1.5rem;
+}
+
+/* ---------- Responsive: stack panels on smaller screens ----------
+   Below 800px wide, switch the grid from two columns to one,
+   so the Activity panel appears above the Protocol panel.
+------------------------------------------------------------- */
+@media (max-width: 800px) {
+    .dashboard {
+        grid-template-columns: 1fr;
+        padding: 0 1rem;
+    }
+
+    .site-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.5rem;
+    }
+}
