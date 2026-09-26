@@ -124,6 +124,7 @@ def send_live_mail(to: str, subject: str, body: str):
 
     events.append({
         "protocol": "DNS",
+        "transport": "UDP",
         "direction": "client-to-server",
         "summary": "DNS Query (SMTP Host)",
         "raw": f"Query: {host}  Type: A",
@@ -134,6 +135,7 @@ def send_live_mail(to: str, subject: str, body: str):
 
     events.append({
         "protocol": "DNS",
+        "transport": "UDP",
         "direction": "server-to-client",
         "summary": "DNS Response (SMTP Host)",
         "raw": f"{host} -> {ip_address}",
@@ -174,6 +176,7 @@ def send_live_mail(to: str, subject: str, body: str):
 
         events.append({
             "protocol": "SMTP",
+            "transport": "TCP",
             "direction": "server-to-client",
             "summary": "SMTP Server Greeting (Live)",
             "raw": f"{connect_code} {connect_msg}".strip(),
@@ -190,6 +193,7 @@ def send_live_mail(to: str, subject: str, body: str):
         # Step 3: EHLO
         events.append({
             "protocol": "SMTP",
+            "transport": "TCP",
             "direction": "client-to-server",
             "summary": "Client Introduction (EHLO)",
             "raw": f"EHLO {client_hostname}",
@@ -202,6 +206,7 @@ def send_live_mail(to: str, subject: str, body: str):
         ehlo_text = _decode_bytes(ehlo_resp)
         events.append({
             "protocol": "SMTP",
+            "transport": "TCP",
             "direction": "server-to-client",
             "summary": "EHLO Response",
             "raw": f"{code} {ehlo_text}".strip(),
@@ -218,6 +223,7 @@ def send_live_mail(to: str, subject: str, body: str):
             if server.has_extn("starttls"):
                 events.append({
                     "protocol": "SMTP",
+                    "transport": "TCP",
                     "direction": "client-to-server",
                     "summary": "STARTTLS Negotiation",
                     "raw": "STARTTLS",
@@ -229,6 +235,7 @@ def send_live_mail(to: str, subject: str, body: str):
                 tls_text = _decode_bytes(tls_resp)
                 events.append({
                     "protocol": "SMTP",
+                    "transport": "TCP",
                     "direction": "server-to-client",
                     "summary": "TLS Handshake Established",
                     "raw": f"{code} {tls_text}".strip(),
@@ -240,6 +247,7 @@ def send_live_mail(to: str, subject: str, body: str):
                 # Re-issue EHLO after TLS per RFC 3207
                 events.append({
                     "protocol": "SMTP",
+                    "transport": "TCP",
                     "direction": "client-to-server",
                     "summary": "Post-TLS Client Introduction (EHLO)",
                     "raw": f"EHLO {client_hostname}",
@@ -251,6 +259,7 @@ def send_live_mail(to: str, subject: str, body: str):
                 ehlo_text = _decode_bytes(ehlo_resp)
                 events.append({
                     "protocol": "SMTP",
+                    "transport": "TCP",
                     "direction": "server-to-client",
                     "summary": "Post-TLS EHLO Response",
                     "raw": f"{code} {ehlo_text}".strip(),
@@ -266,6 +275,7 @@ def send_live_mail(to: str, subject: str, body: str):
         if username and password:
             events.append({
                 "protocol": "SMTP",
+                "transport": "TCP",
                 "direction": "client-to-server",
                 "summary": "SMTP Authentication Request (Live)",
                 "raw": "AUTH <redacted>",
@@ -283,6 +293,7 @@ def send_live_mail(to: str, subject: str, body: str):
                 auth_text = _decode_bytes(auth_resp)
                 events.append({
                     "protocol": "SMTP",
+                    "transport": "TCP",
                     "direction": "server-to-client",
                     "summary": "Authentication Accepted (Live)",
                     "raw": f"{auth_code} {auth_text}".strip(),
@@ -294,6 +305,7 @@ def send_live_mail(to: str, subject: str, body: str):
                 err_text = _decode_bytes(auth_err.smtp_error)
                 events.append({
                     "protocol": "SMTP",
+                    "transport": "TCP",
                     "direction": "server-to-client",
                     "summary": "Authentication Rejected (Live)",
                     "raw": f"{auth_err.smtp_code} {err_text}".strip(),
@@ -306,6 +318,7 @@ def send_live_mail(to: str, subject: str, body: str):
         # Step 6: MAIL FROM
         events.append({
             "protocol": "SMTP",
+            "transport": "TCP",
             "direction": "client-to-server",
             "summary": "MAIL FROM Command",
             "raw": f"MAIL FROM:<{from_addr}>",
@@ -318,6 +331,7 @@ def send_live_mail(to: str, subject: str, body: str):
         mail_text = _decode_bytes(mail_resp)
         events.append({
             "protocol": "SMTP",
+            "transport": "TCP",
             "direction": "server-to-client",
             "summary": "MAIL FROM Response",
             "raw": f"{code} {mail_text}".strip(),
@@ -331,6 +345,7 @@ def send_live_mail(to: str, subject: str, body: str):
         # Step 7: RCPT TO
         events.append({
             "protocol": "SMTP",
+            "transport": "TCP",
             "direction": "client-to-server",
             "summary": "RCPT TO Command",
             "raw": f"RCPT TO:<{to}>",
@@ -343,6 +358,7 @@ def send_live_mail(to: str, subject: str, body: str):
         rcpt_text = _decode_bytes(rcpt_resp)
         events.append({
             "protocol": "SMTP",
+            "transport": "TCP",
             "direction": "server-to-client",
             "summary": "RCPT TO Response",
             "raw": f"{code} {rcpt_text}".strip(),
@@ -356,6 +372,7 @@ def send_live_mail(to: str, subject: str, body: str):
         # Step 8: DATA
         events.append({
             "protocol": "SMTP",
+            "transport": "TCP",
             "direction": "client-to-server",
             "summary": "DATA Command",
             "raw": "DATA",
@@ -369,6 +386,7 @@ def send_live_mail(to: str, subject: str, body: str):
         data_text = _decode_bytes(data_resp)
         events.append({
             "protocol": "SMTP",
+            "transport": "TCP",
             "direction": "server-to-client",
             "summary": "DATA Intermediate Response",
             "raw": f"{code} {data_text}".strip(),
@@ -396,6 +414,7 @@ def send_live_mail(to: str, subject: str, body: str):
 
         events.append({
             "protocol": "SMTP",
+            "transport": "TCP",
             "direction": "client-to-server",
             "summary": "Message Content Transmission",
             "raw": (
@@ -429,6 +448,7 @@ def send_live_mail(to: str, subject: str, body: str):
 
         events.append({
             "protocol": "SMTP",
+            "transport": "TCP",
             "direction": "server-to-client",
             "summary": "Message Accepted (Queued)",
             "raw": f"{code} {final_text}".strip(),
@@ -442,6 +462,7 @@ def send_live_mail(to: str, subject: str, body: str):
         # Step 9: QUIT
         events.append({
             "protocol": "SMTP",
+            "transport": "TCP",
             "direction": "client-to-server",
             "summary": "QUIT Command",
             "raw": "QUIT",
@@ -455,6 +476,7 @@ def send_live_mail(to: str, subject: str, body: str):
             quit_text = _decode_bytes(quit_resp)
             events.append({
                 "protocol": "SMTP",
+                "transport": "TCP",
                 "direction": "server-to-client",
                 "summary": "QUIT Response (Connection Closed)",
                 "raw": f"{code} {quit_text}".strip(),

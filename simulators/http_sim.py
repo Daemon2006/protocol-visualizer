@@ -30,6 +30,7 @@ def simulate_http(domain: str, path: str = "/"):
     """
     request_event = {
         "protocol": "HTTP",
+        "transport": "TCP",
         "direction": "client-to-server",
         "summary": "HTTP GET Request",
         "raw": (
@@ -59,6 +60,7 @@ def simulate_http(domain: str, path: str = "/"):
 
     response_event = {
         "protocol": "HTTP",
+        "transport": "TCP",
         "direction": "server-to-client",
         "summary": "HTTP Response",
         "raw": (

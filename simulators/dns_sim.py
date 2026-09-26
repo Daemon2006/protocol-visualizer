@@ -44,6 +44,7 @@ def simulate_dns(domain: str):
 
     query_event = {
         "protocol": "DNS",
+        "transport": "UDP",
         "direction": "client-to-server",
         "summary": "DNS Query",
         "raw": f"Query: {domain}  Type: A  ID: {transaction_id}",
@@ -58,6 +59,7 @@ def simulate_dns(domain: str):
 
     response_event = {
         "protocol": "DNS",
+        "transport": "UDP",
         "direction": "server-to-client",
         "summary": "DNS Response",
         "raw": f"{domain} -> {ip_address}  TTL: 300  ID: {transaction_id}",

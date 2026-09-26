@@ -51,6 +51,7 @@ def simulate_mail(to: str, subject: str, body: str):
     # ---------- 1-2: DNS / MX lookup ----------
     events.append({
         "protocol": "DNS",
+        "transport": "UDP",
         "direction": "client-to-server",
         "summary": "DNS Query (MX)",
         "raw": f"Query: {recipient_domain}  Type: MX",
@@ -60,6 +61,7 @@ def simulate_mail(to: str, subject: str, body: str):
     })
     events.append({
         "protocol": "DNS",
+        "transport": "UDP",
         "direction": "server-to-client",
         "summary": "DNS Response (MX)",
         "raw": f"{recipient_domain} -> MX 10 {mail_server}",
@@ -71,6 +73,7 @@ def simulate_mail(to: str, subject: str, body: str):
     # ---------- 3: SMTP greeting ----------
     events.append({
         "protocol": "SMTP",
+        "transport": "TCP",
         "direction": "server-to-client",
         "summary": "SMTP Greeting",
         "raw": f"220 {mail_server} ESMTP Service Ready",
@@ -82,6 +85,7 @@ def simulate_mail(to: str, subject: str, body: str):
     # ---------- 4: EHLO ----------
     events.append({
         "protocol": "SMTP",
+        "transport": "TCP",
         "direction": "client-to-server",
         "summary": "EHLO",
         "raw": f"EHLO {CLIENT_HOSTNAME}",
@@ -91,6 +95,7 @@ def simulate_mail(to: str, subject: str, body: str):
     })
     events.append({
         "protocol": "SMTP",
+        "transport": "TCP",
         "direction": "server-to-client",
         "summary": "EHLO Response",
         "raw": (
@@ -108,6 +113,7 @@ def simulate_mail(to: str, subject: str, body: str):
     # ---------- 5: MAIL FROM ----------
     events.append({
         "protocol": "SMTP",
+        "transport": "TCP",
         "direction": "client-to-server",
         "summary": "MAIL FROM",
         "raw": f"MAIL FROM:<{FIXED_SENDER}>",
@@ -117,6 +123,7 @@ def simulate_mail(to: str, subject: str, body: str):
     })
     events.append({
         "protocol": "SMTP",
+        "transport": "TCP",
         "direction": "server-to-client",
         "summary": "MAIL FROM Response",
         "raw": "250 2.1.0 OK",
@@ -128,6 +135,7 @@ def simulate_mail(to: str, subject: str, body: str):
     # ---------- 6: RCPT TO ----------
     events.append({
         "protocol": "SMTP",
+        "transport": "TCP",
         "direction": "client-to-server",
         "summary": "RCPT TO",
         "raw": f"RCPT TO:<{to}>",
@@ -137,6 +145,7 @@ def simulate_mail(to: str, subject: str, body: str):
     })
     events.append({
         "protocol": "SMTP",
+        "transport": "TCP",
         "direction": "server-to-client",
         "summary": "RCPT TO Response",
         "raw": "250 2.1.5 OK",
@@ -148,6 +157,7 @@ def simulate_mail(to: str, subject: str, body: str):
     # ---------- 7: DATA ----------
     events.append({
         "protocol": "SMTP",
+        "transport": "TCP",
         "direction": "client-to-server",
         "summary": "DATA",
         "raw": "DATA",
@@ -157,6 +167,7 @@ def simulate_mail(to: str, subject: str, body: str):
     })
     events.append({
         "protocol": "SMTP",
+        "transport": "TCP",
         "direction": "server-to-client",
         "summary": "DATA Response",
         "raw": "354 End data with <CR><LF>.<CR><LF>",
@@ -175,6 +186,7 @@ def simulate_mail(to: str, subject: str, body: str):
     )
     events.append({
         "protocol": "SMTP",
+        "transport": "TCP",
         "direction": "client-to-server",
         "summary": "Message Data",
         "raw": message_data,
@@ -184,6 +196,7 @@ def simulate_mail(to: str, subject: str, body: str):
     })
     events.append({
         "protocol": "SMTP",
+        "transport": "TCP",
         "direction": "server-to-client",
         "summary": "Message Queued",
         "raw": "250 2.0.0 OK: queued",
@@ -195,6 +208,7 @@ def simulate_mail(to: str, subject: str, body: str):
     # ---------- 9: QUIT ----------
     events.append({
         "protocol": "SMTP",
+        "transport": "TCP",
         "direction": "client-to-server",
         "summary": "QUIT",
         "raw": "QUIT",
@@ -204,6 +218,7 @@ def simulate_mail(to: str, subject: str, body: str):
     })
     events.append({
         "protocol": "SMTP",
+        "transport": "TCP",
         "direction": "server-to-client",
         "summary": "Connection Closed",
         "raw": "221 2.0.0 Bye",

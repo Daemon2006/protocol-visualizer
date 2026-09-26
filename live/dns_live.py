@@ -71,6 +71,7 @@ def build_live_dns_events(domain: str):
 
     query_event = {
         "protocol": "DNS",
+        "transport": "UDP",
         "direction": "client-to-server",
         "summary": "DNS Query (Live)",
         "raw": f"Query: {domain}  Type: A",
@@ -88,6 +89,7 @@ def build_live_dns_events(domain: str):
 
     response_event = {
         "protocol": "DNS",
+        "transport": "UDP",
         "direction": "server-to-client",
         "summary": "DNS Response (Live)",
         "raw": f"{domain} -> {ip_address}",

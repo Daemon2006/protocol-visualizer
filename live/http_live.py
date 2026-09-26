@@ -154,6 +154,7 @@ def build_live_http_events(domain: str, path: str, resolved_ip: str, scheme: str
 
     request_event = {
         "protocol": "HTTP",
+        "transport": "TCP",
         "direction": "client-to-server",
         "summary": f"{label} Request (Live)",
         "raw": (
@@ -175,6 +176,7 @@ def build_live_http_events(domain: str, path: str, resolved_ip: str, scheme: str
 
     response_event = {
         "protocol": "HTTP",
+        "transport": "TCP",
         "direction": "server-to-client",
         "summary": f"{label} Response (Live)",
         "raw": "\n".join(raw_lines),

@@ -67,6 +67,7 @@ def simulate_streaming(quality: str):
     # ---------- 1-2: DNS ----------
     events.append({
         "protocol": "DNS",
+        "transport": "UDP",
         "direction": "client-to-server",
         "summary": "DNS Query",
         "raw": f"Query: {STREAMING_HOST}  Type: A",
@@ -76,6 +77,7 @@ def simulate_streaming(quality: str):
     })
     events.append({
         "protocol": "DNS",
+        "transport": "UDP",
         "direction": "server-to-client",
         "summary": "DNS Response",
         "raw": f"{STREAMING_HOST} -> {ip_address}",
@@ -95,6 +97,7 @@ def simulate_streaming(quality: str):
 
     events.append({
         "protocol": "HTTP",
+        "transport": "TCP",
         "direction": "client-to-server",
         "summary": "HTTP Manifest Request",
         "raw": (
@@ -108,6 +111,7 @@ def simulate_streaming(quality: str):
     })
     events.append({
         "protocol": "HTTP",
+        "transport": "TCP",
         "direction": "server-to-client",
         "summary": "HTTP Manifest Response",
         "raw": (
@@ -133,6 +137,7 @@ def simulate_streaming(quality: str):
 
         events.append({
             "protocol": "HTTP",
+            "transport": "TCP",
             "direction": "client-to-server",
             "summary": f"HTTP Segment {i} Request",
             "raw": (
@@ -147,6 +152,7 @@ def simulate_streaming(quality: str):
 
         events.append({
             "protocol": "HTTP",
+            "transport": "TCP",
             "direction": "server-to-client",
             "summary": f"HTTP Segment {i} Response",
             "raw": (

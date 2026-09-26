@@ -487,6 +487,7 @@ streamingForm.addEventListener("submit", async (event) => {
             manifestStartTime = performance.now();
             Visualizer.appendLiveEvent({
                 protocol: "HTTP",
+                transport: "TCP",
                 direction: "client-to-server",
                 summary: "HTTP Manifest Request (Live)",
                 raw: `GET ${streamPath} HTTP/1.1\nHost: ${streamDomain}\nAccept: application/vnd.apple.mpegurl, */*`,
@@ -515,6 +516,7 @@ streamingForm.addEventListener("submit", async (event) => {
 
             Visualizer.appendLiveEvent({
                 protocol: "HTTP",
+                transport: "TCP",
                 direction: "server-to-client",
                 summary: "HTTP Manifest Response (Live)",
                 raw: `HTTP/1.1 200 OK\nContent-Type: application/vnd.apple.mpegurl\nStreams: ${levelCount} bitrate levels`,
@@ -549,6 +551,7 @@ streamingForm.addEventListener("submit", async (event) => {
 
             Visualizer.appendLiveEvent({
                 protocol: "HTTP",
+                transport: "TCP",
                 direction: "client-to-server",
                 summary: `HTTP Segment Request (Live - ${qualityLabel})`,
                 raw: `GET ${fragPath} HTTP/1.1\nHost: ${streamDomain}\nAccept: video/mp2t, video/mp4, */*`,
@@ -573,6 +576,7 @@ streamingForm.addEventListener("submit", async (event) => {
 
             Visualizer.appendLiveEvent({
                 protocol: "HTTP",
+                transport: "TCP",
                 direction: "server-to-client",
                 summary: `HTTP Segment Response (Live - ${qualityLabel})`,
                 raw: `HTTP/1.1 200 OK\nContent-Type: video/mp2t\nBytes: ${bytesLoaded}\nDuration: ${segDuration}`,

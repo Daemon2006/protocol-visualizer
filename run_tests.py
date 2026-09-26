@@ -27,7 +27,7 @@ class ProtocolVisualizerTests(unittest.TestCase):
     # 1. SIMULATION MODE REGRESSIONS
     # =========================================================================
     def test_simulation_browsing(self):
-        """Simulation Browsing must return exactly 4 deterministic events."""
+        """Simulation Browsing must return exactly 4 deterministic events with UDP/TCP transport."""
         res = self.client.post("/api/simulate/browsing", json={"url": "example.com"})
         self.assertEqual(res.status_code, 200)
         data = res.get_json()
@@ -38,6 +38,8 @@ class ProtocolVisualizerTests(unittest.TestCase):
         self.assertEqual([e["step"] for e in data["events"]], [1, 2, 3, 4])
         # Protocols must be DNS and HTTP only
         self.assertEqual(set(e["protocol"] for e in data["events"]), {"DNS", "HTTP"})
+        # Transport layer mapping: DNS -> UDP, HTTP -> TCP
+        self.assertEqual([e["transport"] for e in data["events"]], ["UDP", "UDP", "TCP", "TCP"])
 
     def test_simulation_browsing_404(self):
         """Simulation Browsing with 'notfound' in domain simulates a 404 response."""
@@ -47,7 +49,7 @@ class ProtocolVisualizerTests(unittest.TestCase):
         self.assertIn("404", data["events"][3]["fields"]["Status"])
 
     def test_simulation_mail(self):
-        """Simulation Mail must return exactly 15 deterministic events."""
+        """Simulation Mail must return exactly 15 deterministic events with UDP/TCP transport."""
         res = self.client.post(
             "/api/simulate/mail",
             json={"to": "alice@example.com", "subject": "Test", "body": "Hello world!"}
@@ -57,15 +59,17 @@ class ProtocolVisualizerTests(unittest.TestCase):
         self.assertEqual(data["activity"], "mail")
         self.assertEqual(len(data["events"]), 15)
         self.assertEqual([e["step"] for e in data["events"]], list(range(1, 16)))
-        # Every event must be DNS or SMTP
+        # Every event must be DNS (UDP) or SMTP (TCP)
         for e in data["events"]:
             self.assertIn(e["protocol"], ["DNS", "SMTP"])
+            expected_transport = "UDP" if e["protocol"] == "DNS" else "TCP"
+            self.assertEqual(e["transport"], expected_transport)
         # Check standard reply codes
         self.assertEqual(data["events"][2]["fields"]["Code"], "220")
         self.assertEqual(data["events"][14]["fields"]["Code"], "221 2.0.0")
 
     def test_simulation_streaming_qualities(self):
-        """Simulation Streaming must return exactly 10 events for 360p, 720p, 1080p."""
+        """Simulation Streaming must return exactly 10 events for 360p, 720p, 1080p with UDP/TCP transport."""
         for quality in ["360p", "720p", "1080p"]:
             res = self.client.post("/api/simulate/streaming", json={"quality": quality})
             self.assertEqual(res.status_code, 200)
@@ -77,6 +81,11 @@ class ProtocolVisualizerTests(unittest.TestCase):
             self.assertIn(f"/video/{quality}/playlist.m3u8", data["events"][2]["raw"])
             for seg_idx in [4, 6, 8]:
                 self.assertIn(f"/video/{quality}/", data["events"][seg_idx]["raw"])
+            # Transport layer mapping: first 2 DNS -> UDP, remaining 8 HTTP -> TCP
+            self.assertEqual(
+                [e["transport"] for e in data["events"]],
+                ["UDP", "UDP"] + ["TCP"] * 8
+            )
 
     # =========================================================================
     # 2. LIVE BROWSING & SAFETY
@@ -155,11 +164,75 @@ class ProtocolVisualizerTests(unittest.TestCase):
                     self.assertGreater(len(events), 8)
 
                     # Verify sensitive secrets are NEVER exposed in any event
+                    # and transport metadata is UDP for DNS and TCP for SMTP
                     for e in events:
                         self.assertNotIn("supersecretpassword123", e["raw"])
                         self.assertNotIn("supersecretpassword123", str(e["fields"]))
+                        expected_transport = "UDP" if e["protocol"] == "DNS" else "TCP"
+                        self.assertEqual(e["transport"], expected_transport)
                         if e.get("summary") == "SMTP Authentication Request (Live)":
                             self.assertIn("<redacted>", e["raw"])
+
+    def test_transport_layer_live_and_frontend(self):
+        """Verify Live DNS/HTTP transport metadata and frontend TCP/UDP visualizer rules."""
+        with patch("live.dns_live.resolve_domain", return_value=("93.184.216.34", 12.0)):
+            res_dns = self.client.post("/api/live/dns", json={"url": "example.com"})
+            self.assertEqual(res_dns.status_code, 200)
+            dns_events = res_dns.get_json()["events"]
+            self.assertEqual([e["transport"] for e in dns_events], ["UDP", "UDP"])
+
+            with patch("live.http_live.fetch_live", return_value=(200, "OK", {"Content-Type": "text/html"}, 28.0)):
+                res = self.client.post("/api/live/browsing", json={"url": "example.com"})
+                self.assertEqual(res.status_code, 200)
+                data = res.get_json()
+                self.assertEqual([e["transport"] for e in data["events"]], ["UDP", "UDP", "TCP", "TCP"])
+
+        with open("static/js/visualizer.js", "r", encoding="utf-8") as f:
+            viz_js = f.read()
+
+        # Verify dynamic TCP connection start detection (no hardcoded step === 3 or index === 2)
+        self.assertIn("isTcpConnectionStart", viz_js)
+        self.assertIn('current.transport !== "TCP"', viz_js)
+        self.assertIn('prev.transport !== "TCP"', viz_js)
+        self.assertNotIn("step === 3", viz_js)
+        self.assertNotIn("index === 2", viz_js)
+
+        # Verify reusable transport renderer, TCP handshake, UDP datagram, direction, and fallback
+        self.assertIn("renderTransportLayer", viz_js)
+        self.assertIn("transport-handshake--animate", viz_js)
+        self.assertIn("transport-handshake--established", viz_js)
+        self.assertIn("transport-layer--udp", viz_js)
+        self.assertIn("transport-layer--tcp", viz_js)
+        self.assertIn("transport-arrow--c2s", viz_js)
+        self.assertIn("transport-arrow--s2c", viz_js)
+        self.assertIn("Not specified", viz_js)
+
+        # Verify Pause/Resume freezes CSS animation via transport-viz--paused
+        self.assertIn("transport-viz--paused", viz_js)
+        self.assertIn("remainingStepMs", viz_js)
+
+        with open("static/css/style.css", "r", encoding="utf-8") as f:
+            css = f.read()
+        self.assertIn("animation-play-state: paused !important", css)
+        self.assertIn("--color-dns", css)
+        self.assertIn("--color-http", css)
+        self.assertIn("--color-smtp", css)
+        self.assertIn("--color-tcp", css)
+        self.assertIn("--color-udp", css)
+        self.assertIn("--color-success", css)
+        self.assertIn("--color-error", css)
+
+    def test_invalid_inputs_regression(self):
+        """Verify all existing input validation and error handling remain intact."""
+        # Browsing empty URL
+        self.assertEqual(self.client.post("/api/simulate/browsing", json={"url": "   "}).status_code, 400)
+        # Mail validation
+        self.assertEqual(self.client.post("/api/simulate/mail", json={"to": "", "subject": "S", "body": "B"}).status_code, 400)
+        self.assertEqual(self.client.post("/api/simulate/mail", json={"to": "invalid-email", "subject": "S", "body": "B"}).status_code, 400)
+        self.assertEqual(self.client.post("/api/simulate/mail", json={"to": "a@b.com", "subject": "", "body": "B"}).status_code, 400)
+        self.assertEqual(self.client.post("/api/simulate/mail", json={"to": "a@b.com", "subject": "S", "body": ""}).status_code, 400)
+        # Streaming invalid quality
+        self.assertEqual(self.client.post("/api/simulate/streaming", json={"quality": "4K"}).status_code, 400)
 
     # =========================================================================
     # 4. STRUCTURAL & HTML CHECKS
