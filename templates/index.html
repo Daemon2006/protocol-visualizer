@@ -110,14 +110,15 @@
                                     <span class="browser-preview__dot"></span>
                                 </div>
                                 <span id="browser-preview-address" class="browser-preview__address">about:blank</span>
+                                <a id="browser-preview-open-tab" href="#" target="_blank" rel="noopener noreferrer" class="browser-preview__open-btn" title="Open loaded URL in a new browser tab">Open in New Tab &nearr;</a>
                                 <button type="button" id="btn-toggle-fallback" class="browser-preview__btn-info" title="Toggle embedding explanation">Notice</button>
                             </div>
                             <div class="browser-preview__viewport">
                                 <iframe id="browser-preview-iframe" sandbox="allow-scripts allow-same-origin allow-forms" title="Browser Preview"></iframe>
                                 <div id="browser-preview-fallback" class="browser-preview__fallback browser-preview__fallback--hidden">
-                                    <p class="browser-preview__fallback-title">Preview unavailable &mdash; this website does not allow embedding.</p>
+                                    <p id="browser-preview-fallback-title" class="browser-preview__fallback-title">Preview unavailable &mdash; this website does not allow iframe embedding.</p>
                                     <p class="browser-preview__fallback-desc">Sites that send <code>X-Frame-Options: DENY/SAMEORIGIN</code> or <code>Content-Security-Policy: frame-ancestors</code> restrict embedding in iframes. The protocol visualization on the right reflects the real HTTP/HTTPS network exchange.</p>
-                                    <a id="browser-preview-link" href="#" target="_blank" rel="noopener noreferrer" class="browser-preview__ext-link">Open website in new tab &nearr;</a>
+                                    <a id="browser-preview-link" href="#" target="_blank" rel="noopener noreferrer" class="browser-preview__ext-link">Open in New Tab &nearr;</a>
                                 </div>
                             </div>
                         </div>

@@ -65,6 +65,7 @@ const previewIframe = document.getElementById("browser-preview-iframe");
 const previewAddress = document.getElementById("browser-preview-address");
 const previewFallback = document.getElementById("browser-preview-fallback");
 const previewLink = document.getElementById("browser-preview-link");
+const previewOpenTab = document.getElementById("browser-preview-open-tab");
 const btnToggleFallback = document.getElementById("btn-toggle-fallback");
 
 if (btnToggleFallback) {
@@ -133,11 +134,26 @@ function extractLiveSummary(events) {
     const fields = (httpResponse && httpResponse.fields) ? httpResponse.fields : {};
 
     let xfo = null;
+    let csp = null;
     let location = null;
     for (const [k, v] of Object.entries(fields)) {
         const lower = k.toLowerCase();
         if (lower === "x-frame-options") xfo = v;
+        if (lower === "content-security-policy") csp = v;
         if (lower === "location") location = v;
+    }
+
+    // Check if CSP contains a restrictive frame-ancestors directive
+    let cspBlocksFraming = false;
+    if (csp) {
+        const cspLower = String(csp).toLowerCase();
+        if (cspLower.includes("frame-ancestors")) {
+            const match = cspLower.match(/frame-ancestors\s+([^;]+)/);
+            const policyVal = match ? match[1].trim() : "";
+            if (policyVal !== "*" && policyVal !== "http: https:") {
+                cspBlocksFraming = true;
+            }
+        }
     }
 
     return {
@@ -145,6 +161,8 @@ function extractLiveSummary(events) {
         status: fields["Status"] || null,
         scheme: fields["Scheme"] || null,
         xFrameOptions: xfo,
+        contentSecurityPolicy: csp,
+        cspBlocksFraming: cspBlocksFraming,
         location: location,
     };
 }
@@ -178,18 +196,15 @@ browsingForm.addEventListener("submit", async (event) => {
     visitButton.disabled = true;
     setStatus(isLive ? `Resolving and fetching ${rawUrl} (Live) ...` : `Visiting ${rawUrl} ...`);
 
-    // Best-effort Browser Preview setup (contained inside Activity Panel)
+    // Prepare Browser Preview container (wait for backend response before setting iframe.src
+    // so blocked sites or SSL errors do not trigger broken browser error frames)
     if (isLive) {
         previewContainer.classList.remove("browser-preview-container--hidden");
         previewAddress.textContent = liveUrl;
         if (previewLink) previewLink.href = liveUrl;
+        if (previewOpenTab) previewOpenTab.href = liveUrl;
         previewFallback.classList.add("browser-preview__fallback--hidden");
-        previewIframe.src = liveUrl;
-
-        // Fallback detection for cross-origin or load errors
-        previewIframe.onerror = () => {
-            previewFallback.classList.remove("browser-preview__fallback--hidden");
-        };
+        previewIframe.src = "about:blank";
     } else {
         previewContainer.classList.add("browser-preview-container--hidden");
         previewIframe.src = "about:blank";
@@ -205,28 +220,39 @@ browsingForm.addEventListener("submit", async (event) => {
         const data = await response.json();
 
         if (!response.ok) {
-            setStatus(data.error || "Something went wrong.", true);
-            if (isLive && activeActivity === "browsing") {
-                Visualizer.reset();
+            const errMsg = data.error || "Something went wrong.";
+            setStatus(errMsg, true);
+            if (isLive) {
+                addLogEntry(`Live browsing failed for ${rawUrl}: ${errMsg}`);
+                previewContainer.classList.add("browser-preview-container--hidden");
+                previewIframe.src = "about:blank";
+                if (activeActivity === "browsing") {
+                    Visualizer.reset();
+                }
             }
             return;
         }
 
         if (isLive) {
-            const { ip, status, scheme, xFrameOptions, location } = extractLiveSummary(data.events);
+            const { ip, status, scheme, xFrameOptions, cspBlocksFraming, location } = extractLiveSummary(data.events);
             addLogEntry(
                 `Live browsing completed: ${data.domain} \u2014 resolved IP: ${ip}` +
                 `${scheme ? `, protocol: ${scheme}` : ""}${status ? `, status: ${status}` : ""}`
             );
 
-            // If server returned X-Frame-Options, or redirected to a known-blocked site,
-            // or domain is known to block embedding, display the fallback note immediately
+            // Detect iframe refusal from X-Frame-Options, CSP frame-ancestors, or known blocked hosts
             const domainLower = (data.domain || "").toLowerCase();
             const locLower = (location || "").toLowerCase();
             const isBlockedSite = KNOWN_EMBED_BLOCKED.some(site => domainLower.includes(site) || locLower.includes(site));
 
-            if (xFrameOptions || isBlockedSite) {
+            if (xFrameOptions || cspBlocksFraming || isBlockedSite) {
+                previewIframe.src = "about:blank";
                 previewFallback.classList.remove("browser-preview__fallback--hidden");
+            } else {
+                previewIframe.onerror = () => {
+                    previewFallback.classList.remove("browser-preview__fallback--hidden");
+                };
+                previewIframe.src = liveUrl;
             }
         } else {
             addLogEntry(`Visited ${rawUrl} (${data.events.length} protocol steps)`);

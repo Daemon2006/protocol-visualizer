@@ -473,6 +473,7 @@ a:focus-visible {
 
 .browser-preview__address {
     flex: 1;
+    min-width: 0;
     font-family: var(--font-mono);
     font-size: 0.74rem;
     color: var(--color-ink);
@@ -542,6 +543,28 @@ a:focus-visible {
     border: 1px solid var(--color-border);
 }
 
+.browser-preview__open-btn {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--color-activity);
+    background: var(--color-activity-tint);
+    border: 1px solid var(--color-activity-border);
+    border-radius: 4px;
+    padding: 0.22rem 0.6rem;
+    cursor: pointer;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: all 0.15s ease;
+}
+
+.browser-preview__open-btn:hover {
+    background: var(--color-activity);
+    border-color: var(--color-activity);
+    color: #08101D;
+    box-shadow: 0 2px 8px rgba(56, 189, 248, 0.25);
+}
+
 .browser-preview__btn-info {
     font-family: var(--font-mono);
     font-size: 0.7rem;
@@ -552,6 +575,8 @@ a:focus-visible {
     border-radius: 4px;
     padding: 0.18rem 0.5rem;
     cursor: pointer;
+    text-decoration: none;
+    white-space: nowrap;
 }
 
 .browser-preview__btn-info:hover {
@@ -561,15 +586,23 @@ a:focus-visible {
 
 .browser-preview__ext-link {
     display: inline-block;
-    margin-top: 0.65rem;
+    margin-top: 0.75rem;
+    padding: 0.4rem 0.85rem;
+    font-family: var(--font-mono);
     font-size: 0.78rem;
-    color: var(--color-activity);
-    text-decoration: none;
     font-weight: 600;
+    color: #08101D;
+    background: var(--color-activity);
+    border: 1px solid var(--color-activity);
+    border-radius: 5px;
+    text-decoration: none;
+    transition: all 0.15s ease;
 }
 
 .browser-preview__ext-link:hover {
-    text-decoration: underline;
+    background: var(--color-activity-hover);
+    border-color: var(--color-activity-hover);
+    box-shadow: 0 3px 10px rgba(56, 189, 248, 0.28);
 }
 
 /* ---------- Live Video Container (Live Streaming) ---------- */

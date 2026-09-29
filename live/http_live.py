@@ -35,6 +35,8 @@ the panel simple and avoid dumping arbitrary fetched content into the UI.
 """
 
 import ipaddress
+import re
+import ssl
 import time
 import urllib.error
 import urllib.request
@@ -45,11 +47,39 @@ USER_AGENT = "ProtocolVisualizer-LiveMode/1.0 (educational demo)"
 # small enough to stay readable in the panel. "Location" matters here
 # specifically because we no longer follow redirects, so it's the only
 # way to see where a 3xx response would have sent a real browser.
-HEADERS_TO_SHOW = ("Content-Type", "Content-Length", "Server", "Date", "Location", "X-Frame-Options")
+# "X-Frame-Options" and "Content-Security-Policy" allow detecting when
+# a remote site restricts iframe embedding.
+HEADERS_TO_SHOW = (
+    "Content-Type",
+    "Content-Length",
+    "Server",
+    "Date",
+    "Location",
+    "X-Frame-Options",
+    "Content-Security-Policy",
+)
+_CANONICAL_HEADER_MAP = {h.lower(): h for h in HEADERS_TO_SHOW}
 
 
 class HTTPRequestError(Exception):
     """Raised when the real HTTP(S) request cannot be made at all."""
+
+
+def _format_ssl_error(exc: Exception, url: str) -> str:
+    """
+    Build a clear, user-friendly error message when TLS/SSL certificate
+    verification or handshake fails, stripping internal C-extension
+    file/line noise like '(_ssl.c:1006)'.
+    """
+    raw_msg = getattr(exc, "verify_message", None) or getattr(exc, "reason", None) or str(exc)
+    cleaned = re.sub(r"\s*\(_ssl\.c:\d+\)", "", str(raw_msg)).strip()
+    cleaned = re.sub(r"^\[SSL:\s*[A-Z0-9_]+\]\s*", "", cleaned).strip()
+    if not cleaned:
+        cleaned = "certificate verification failed"
+    return (
+        f"SSL/TLS certificate verification failed for '{url}' ({cleaned}). "
+        "Live Mode enforces strict HTTPS certificate validation."
+    )
 
 
 class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -125,11 +155,12 @@ def fetch_live(url: str, resolved_ip: str):
         status_code = exc.code
         reason = exc.reason
         headers = dict(exc.headers.items()) if exc.headers else {}
+    except ssl.SSLError as exc:
+        raise HTTPRequestError(_format_ssl_error(exc, url)) from exc
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        # Covers connection failures, timeouts, and TLS/certificate
-        # errors (ssl.SSLError is a subclass of OSError) -- none of
-        # these produced any real response, so they're a genuine error.
         reason_detail = getattr(exc, "reason", exc)
+        if isinstance(reason_detail, ssl.SSLError) or "CERTIFICATE_VERIFY_FAILED" in str(reason_detail):
+            raise HTTPRequestError(_format_ssl_error(reason_detail, url)) from exc
         raise HTTPRequestError(f"Could not reach '{url}': {reason_detail}") from exc
 
     duration_ms = (time.perf_counter() - start) * 1000
@@ -141,12 +172,7 @@ def build_live_http_events(domain: str, path: str, resolved_ip: str, scheme: str
     Perform a real HTTP(S) GET for scheme://domain/path (hostname-based,
     never IP-based) and return the two protocol events (Request,
     Response) describing it, using the exact same event structure as
-    the rest of the project. `protocol` stays "HTTP" for both http and
-    https requests (HTTPS is HTTP-over-TLS at the application layer,
-    matching the project's established protocol categories) -- the
-    scheme is instead surfaced in the summary text and a "Scheme" field
-    so HTTPS/TLS is still clearly indicated without inventing a new
-    protocol category.
+    the rest of the project.
     """
     url = f"{scheme}://{domain}{path}"
     label = scheme.upper()  # "HTTP" or "HTTPS", for display only
@@ -167,7 +193,13 @@ def build_live_http_events(domain: str, path: str, resolved_ip: str, scheme: str
         "timing_ms": 0,
     }
 
-    shown_headers = {k: v for k, v in headers.items() if k in HEADERS_TO_SHOW}
+    # Case-insensitive header matching mapped to canonical header names
+    shown_headers = {}
+    for k, v in headers.items():
+        canonical = _CANONICAL_HEADER_MAP.get(k.lower())
+        if canonical:
+            shown_headers[canonical] = v
+
     raw_lines = [f"HTTP {status_code} {reason}"]
     raw_lines.extend(f"{k}: {v}" for k, v in shown_headers.items())
 
