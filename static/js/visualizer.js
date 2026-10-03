@@ -9,13 +9,17 @@
 // panel shows for a given activity run.
 
 const Visualizer = (() => {
-    let events = [];
-    let currentIndex = -1;      // -1 means "nothing loaded yet"
+    let applicationEvents = [];
+    let transportEvents = [];
+    let applicationIndex = -1;  // -1 means "nothing loaded yet"
+    let transportIndex = -1;
+    let activeView = "application"; // "application" or "transport"
     let playTimer = null;       // handle for the auto-advance timer
     let isPaused = false;       // tracks whether playback/animation is currently paused
     let stepStartTime = 0;      // timestamp when the current step timer started
     const STEP_DELAY_MS = 1400; // duration of each automatic step
     let remainingStepMs = STEP_DELAY_MS;
+    let liveFollow = true;      // when true, auto-display newly arrived live events
 
     // Grab the DOM elements once, so we don't re-query them every render.
     const stepIndicator = document.getElementById("protocol-step-indicator");
@@ -24,6 +28,8 @@ const Visualizer = (() => {
     const btnPause = document.getElementById("btn-pause");
     const btnNext = document.getElementById("btn-next");
     const btnReplay = document.getElementById("btn-replay");
+    const tabBtnApp = document.getElementById("protocol-view-application");
+    const tabBtnTrans = document.getElementById("protocol-view-transport");
 
     function isClientToServer(direction) {
         return (
@@ -350,6 +356,7 @@ const Visualizer = (() => {
     // of a TCP conversation/exchange using event metadata and sequence flow
     // (never hardcoded step numbers).
     function isTcpConnectionStart(index) {
+        const events = applicationEvents;
         if (index < 0 || index >= events.length) return false;
         const current = events[index];
         if (!current || current.transport !== "TCP") return false;
@@ -475,6 +482,7 @@ const Visualizer = (() => {
 
     // Turn one event object into HTML and drop it into the event box.
     function renderEvent(event, index) {
+        if (!event) return;
         const fieldsObj = event.fields || {};
         const highlightList = Array.isArray(event.highlight) ? event.highlight : [];
 
@@ -490,11 +498,26 @@ const Visualizer = (() => {
 
         const badgeClass = badgeClassFor(event.protocol);
         const dirClass = directionClassFor(event.direction);
-        const transportHtml = renderTransportLayer(event, index);
+
+        // Determine lower diagram:
+        // 1. Flow Control: always render full Flow Control Data Link layer
+        // 2. Legacy event streams without separate transport events: render legacy transportHtml
+        // 3. New Assignment 2 streams with real transportEvents: do not inject fake decorative handshake
+        let transportHtml = "";
+        const isFlow = isFlowProtocol(event.protocol) || event.transport === "DATA LINK";
+        if (isFlow) {
+            const clientLabel = clientLabelFor(event.protocol);
+            const serverLabel = serverLabelFor(event.protocol);
+            const c2s = isClientToServer(event.direction);
+            const arrowDirClass = c2s ? "transport-arrow--c2s" : "transport-arrow--s2c";
+            const arrowSymbol = c2s ? "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2192" : "\u2190\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500";
+            transportHtml = renderFlowControlLayer(event, index, clientLabel, serverLabel, arrowDirClass, arrowSymbol);
+        } else if (transportEvents.length === 0) {
+            transportHtml = renderTransportLayer(event, index);
+        }
 
         const category = getFlowEventCategory(event);
         const statusClass = category ? ` protocol-message--${category}` : "";
-        const isFlow = isFlowProtocol(event.protocol);
         const layerTitle = isFlow ? "DATA LINK / FLOW CONTROL" : "APPLICATION LAYER";
 
         eventBox.innerHTML = `
@@ -519,26 +542,256 @@ const Visualizer = (() => {
             </div>`;
     }
 
+    // Render a discrete TCP Transport Layer event from transportEvents.
+    function renderTransportEvent(event, index) {
+        if (!event) return;
+        const fieldsObj = event.fields || {};
+        const highlightList = Array.isArray(event.highlight) ? event.highlight : ["Seq", "Ack", "Win", "Flags", "Length"];
+
+        const fieldRows = Object.entries(fieldsObj).map(([key, value]) => {
+            const highlighted = highlightList.includes(key);
+            const rowClass = "protocol-field" + (highlighted ? " protocol-field--highlight" : "");
+            return `
+                <div class="${rowClass}">
+                    <span class="protocol-field__key">${escapeHtml(key)}</span>
+                    <span class="protocol-field__value">${escapeHtml(value)}</span>
+                </div>`;
+        }).join("");
+
+        const c2s = isClientToServer(event.direction);
+        const dirClass = c2s ? "client-to-server" : "server-to-client";
+        const arrowDirClass = c2s ? "transport-arrow--c2s" : "transport-arrow--s2c";
+        const arrowSymbol = c2s
+            ? "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2192"
+            : "\u2190\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500";
+
+        const flags = fieldsObj["Flags"] || "TCP";
+        const seq = fieldsObj["Seq"] !== undefined ? fieldsObj["Seq"] : "-";
+        const ack = fieldsObj["Ack"] !== undefined ? fieldsObj["Ack"] : "-";
+        const win = fieldsObj["Win"] !== undefined ? fieldsObj["Win"] : "-";
+        const length = fieldsObj["Length"] !== undefined ? fieldsObj["Length"] : "0";
+        const tcpState = fieldsObj["TCP State"] || fieldsObj["Client State"] || "ESTABLISHED";
+        const desc = fieldsObj["Description"] || event.summary || "";
+
+        eventBox.innerHTML = `
+            <div class="protocol-layers protocol-layers--transport-only">
+                <div class="transport-layer transport-layer--tcp-view">
+                    <div class="protocol-layer-header">
+                        <span class="protocol-layer-title">TRANSPORT LAYER (TCP)</span>
+                        <span class="transport-badge transport-badge--tcp">TCP</span>
+                        <span class="transport-meta-note">State: ${escapeHtml(tcpState)}</span>
+                    </div>
+
+                    <div class="protocol-message protocol-message--${dirClass}">
+                        <div class="protocol-message__meta">
+                            <span class="transport-badge transport-badge--tcp">TCP</span>
+                            <span class="protocol-direction">${c2s ? "Client \u2192 Server" : "Server \u2192 Client"}</span>
+                            <span class="protocol-timing">t = ${event.timing_ms} ms</span>
+                        </div>
+                        <h4 class="protocol-message__summary">${escapeHtml(event.summary)}</h4>
+                        ${desc ? `<p class="transport-event-description">${escapeHtml(desc)}</p>` : ""}
+                        <pre class="protocol-message__raw">${escapeHtml(event.raw)}</pre>
+                        <div class="protocol-fields">${fieldRows}</div>
+                    </div>
+
+                    <div class="transport-diagram transport-diagram--tcp-discrete">
+                        <div class="transport-endpoints">
+                            <span class="transport-endpoint transport-endpoint--client">CLIENT</span>
+                            <div class="transport-flow-badges">
+                                <span class="transport-flow-pill transport-flow-pill--tcp">${escapeHtml(flags)}</span>
+                                <span class="transport-flow-pill">Win: ${escapeHtml(win)}</span>
+                            </div>
+                            <span class="transport-endpoint transport-endpoint--server">SERVER</span>
+                        </div>
+                        <div class="transport-lane transport-lane--tcp">
+                            <div class="transport-packet transport-packet--tcp transport-packet--discrete ${arrowDirClass}">
+                                <span class="transport-packet__label">
+                                    <strong>[${escapeHtml(flags)}]</strong>
+                                    Seq: ${escapeHtml(seq)} &middot; Ack: ${escapeHtml(ack)} &middot; Len: ${escapeHtml(length)}
+                                </span>
+                                <div class="transport-packet__track">
+                                    <span class="transport-packet__line">${arrowSymbol}</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="transport-status transport-status--tcp">
+                            ${escapeHtml(desc || event.summary)}
+                        </div>
+                    </div>
+                </div>
+            </div>`;
+    }
+
+    // Displays clear notice when in Transport Layer view but no transport stream exists.
+    function renderEmptyTransportState() {
+        eventBox.innerHTML = `
+            <div class="protocol-layers">
+                <div class="transport-layer transport-layer--empty-state">
+                    <div class="protocol-layer-header">
+                        <span class="protocol-layer-title">TRANSPORT LAYER</span>
+                        <span class="transport-badge transport-badge--unknown">Not Available</span>
+                    </div>
+                    <div class="transport-empty-notice">
+                        <div class="transport-empty-notice__icon">&#x2139;</div>
+                        <h4>No Transport Layer event stream available</h4>
+                        <p>No separate Transport Layer event stream was returned for this activity or mode.</p>
+                        <p class="field-note">Flow Control activities operate at the Data Link layer. Live traffic without packet capture does not produce discrete TCP segments.</p>
+                    </div>
+                </div>
+            </div>`;
+    }
+
+    function renderPlaceholder() {
+        eventBox.innerHTML = '<p class="placeholder-note">Waiting for an activity on the left panel&hellip;</p>';
+    }
+
+    function getCurrentEvents() {
+        return activeView === "application" ? applicationEvents : transportEvents;
+    }
+
+    function getCurrentIndex() {
+        return activeView === "application" ? applicationIndex : transportIndex;
+    }
+
+    // Map Application Layer event to nearest logical Transport Layer event.
+    function findTransportIndexForAppEvent(appEvent) {
+        if (!appEvent || transportEvents.length === 0) return 0;
+        if (appEvent.protocol === "DNS") {
+            return 0; // Handshake
+        }
+        const summary = (appEvent.summary || "").toLowerCase();
+        let targetRef = "";
+        if (summary.includes("manifest request")) targetRef = "manifest-request";
+        else if (summary.includes("manifest response")) targetRef = "manifest-response";
+        else if (summary.includes("segment 1 request")) targetRef = "segment-1-request";
+        else if (summary.includes("segment 1 response")) targetRef = "segment-1-response";
+        else if (summary.includes("segment 2 request")) targetRef = "segment-2-request";
+        else if (summary.includes("segment 2 response")) targetRef = "segment-2-response";
+        else if (summary.includes("segment 3 request")) targetRef = "segment-3-request";
+        else if (summary.includes("segment 3 response")) targetRef = "segment-3-response";
+        else if (summary.includes("get request") || summary.includes("http request")) targetRef = "http-request";
+        else if (summary.includes("http response")) targetRef = "http-response";
+        else if (appEvent.protocol === "SMTP") {
+            const cleanSummary = summary.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+            targetRef = cleanSummary.startsWith("smtp-") ? cleanSummary : "smtp-" + cleanSummary;
+        }
+
+        if (targetRef) {
+            const found = transportEvents.findIndex(e => e.application_ref === targetRef);
+            if (found !== -1) return found;
+        }
+        return 0;
+    }
+
+    // Map Transport Layer event to nearest logical Application Layer event.
+    function findAppIndexForTransportEvent(transEvent) {
+        if (!transEvent || applicationEvents.length === 0) return 0;
+        const ref = transEvent.application_ref || "";
+        if (ref === "connection-establish") {
+            const tcpIdx = applicationEvents.findIndex(e => e.transport === "TCP" || e.protocol === "HTTP" || e.protocol === "SMTP");
+            return tcpIdx !== -1 ? tcpIdx : 0;
+        }
+        if (ref === "connection-teardown") {
+            return applicationEvents.length - 1;
+        }
+        const found = applicationEvents.findIndex(appEv => {
+            const summary = (appEv.summary || "").toLowerCase();
+            if (ref === "http-request") return summary.includes("get request") || summary.includes("http request");
+            if (ref === "http-response") return summary.includes("http response");
+            if (ref.startsWith("manifest") || ref.startsWith("segment")) {
+                const words = ref.replace(/-/g, " ");
+                return summary.includes(words);
+            }
+            if (ref.startsWith("smtp-")) {
+                const rawRef = ref.replace(/^smtp-/, "").replace(/-/g, " ");
+                return summary.includes(rawRef);
+            }
+            return false;
+        });
+        return found !== -1 ? found : 0;
+    }
+
+    // Switch between Application Layer and Transport Layer views.
+    function setView(viewName) {
+        if (activeView === viewName) return;
+        activeView = viewName;
+
+        if (tabBtnApp) {
+            const isApp = activeView === "application";
+            tabBtnApp.classList.toggle("protocol-view-tab--active", isApp);
+            tabBtnApp.setAttribute("aria-selected", isApp ? "true" : "false");
+        }
+        if (tabBtnTrans) {
+            const isTrans = activeView === "transport";
+            tabBtnTrans.classList.toggle("protocol-view-tab--active", isTrans);
+            tabBtnTrans.setAttribute("aria-selected", isTrans ? "true" : "false");
+        }
+
+        if (activeView === "transport") {
+            if (transportEvents.length === 0) {
+                stopAutoPlay(false);
+                showCurrentEvent();
+                return;
+            }
+            if (applicationIndex >= 0 && applicationIndex < applicationEvents.length) {
+                transportIndex = findTransportIndexForAppEvent(applicationEvents[applicationIndex]);
+            } else if (transportIndex < 0 && transportEvents.length > 0) {
+                transportIndex = 0;
+            }
+        } else {
+            if (transportIndex >= 0 && transportIndex < transportEvents.length) {
+                applicationIndex = findAppIndexForTransportEvent(transportEvents[transportIndex]);
+            } else if (applicationIndex < 0 && applicationEvents.length > 0) {
+                applicationIndex = 0;
+            }
+        }
+
+        showCurrentEvent();
+    }
+
     function updateStepIndicator() {
-        stepIndicator.textContent = events.length === 0
+        const evts = getCurrentEvents();
+        const idx = getCurrentIndex();
+        stepIndicator.textContent = evts.length === 0
             ? "Step 0 of 0"
-            : `Step ${currentIndex + 1} of ${events.length}`;
+            : `Step ${idx + 1} of ${evts.length}`;
     }
 
     function updateButtonStates() {
-        const hasEvents = events.length > 0;
-        btnPrevious.disabled = !hasEvents || currentIndex <= 0;
-        btnNext.disabled = !hasEvents || currentIndex >= events.length - 1;
+        const evts = getCurrentEvents();
+        const idx = getCurrentIndex();
+        const hasEvents = evts.length > 0;
+        btnPrevious.disabled = !hasEvents || idx <= 0;
+        btnNext.disabled = !hasEvents || idx >= evts.length - 1;
         btnReplay.disabled = !hasEvents;
         btnPause.disabled = !hasEvents;
     }
 
     function showCurrentEvent() {
-        if (currentIndex < 0 || currentIndex >= events.length) {
-            return;
-        }
         eventBox.classList.remove("transport-viz--paused");
-        renderEvent(events[currentIndex], currentIndex);
+        if (activeView === "application") {
+            if (applicationIndex < 0 || applicationIndex >= applicationEvents.length) {
+                renderPlaceholder();
+                updateStepIndicator();
+                updateButtonStates();
+                return;
+            }
+            renderEvent(applicationEvents[applicationIndex], applicationIndex);
+        } else {
+            if (transportEvents.length === 0) {
+                renderEmptyTransportState();
+                updateStepIndicator();
+                updateButtonStates();
+                return;
+            }
+            if (transportIndex < 0 || transportIndex >= transportEvents.length) {
+                renderPlaceholder();
+                updateStepIndicator();
+                updateButtonStates();
+                return;
+            }
+            renderTransportEvent(transportEvents[transportIndex], transportIndex);
+        }
         updateStepIndicator();
         updateButtonStates();
         remainingStepMs = STEP_DELAY_MS;
@@ -572,11 +825,19 @@ const Visualizer = (() => {
 
         playTimer = setTimeout(() => {
             playTimer = null;
-            if (currentIndex >= events.length - 1) {
-                stopAutoPlay(false);
-                return;
+            if (activeView === "application") {
+                if (applicationIndex >= applicationEvents.length - 1) {
+                    stopAutoPlay(false);
+                    return;
+                }
+                applicationIndex += 1;
+            } else {
+                if (transportIndex >= transportEvents.length - 1) {
+                    stopAutoPlay(false);
+                    return;
+                }
+                transportIndex += 1;
             }
-            currentIndex += 1;
             showCurrentEvent();
             scheduleNextStep(STEP_DELAY_MS);
         }, delayMs);
@@ -586,43 +847,64 @@ const Visualizer = (() => {
         scheduleNextStep(STEP_DELAY_MS);
     }
 
-    let liveFollow = true;      // when true, auto-display newly arrived live events
-
     // Called by activity_panel.js after a successful fetch().
-    function loadEvents(newEvents) {
-        events = newEvents;
-        currentIndex = -1;
+    function loadEvents(newEvents, newTransportEvents = []) {
+        applicationEvents = newEvents || [];
+        transportEvents = newTransportEvents || [];
+        applicationIndex = -1;
+        transportIndex = -1;
+        activeView = "application";
         liveFollow = true;
         stopAutoPlay(false);
 
-        if (events.length > 0) {
-            currentIndex = 0;
+        // Reset view tabs UI
+        if (tabBtnApp) {
+            tabBtnApp.classList.add("protocol-view-tab--active");
+            tabBtnApp.setAttribute("aria-selected", "true");
+        }
+        if (tabBtnTrans) {
+            tabBtnTrans.classList.remove("protocol-view-tab--active");
+            tabBtnTrans.setAttribute("aria-selected", "false");
+        }
+
+        if (applicationEvents.length > 0) {
+            applicationIndex = 0;
+        }
+        if (transportEvents.length > 0) {
+            transportIndex = 0;
+        }
+
+        if (applicationEvents.length > 0) {
             showCurrentEvent();
             startAutoPlay();
+        } else {
+            renderPlaceholder();
+            updateStepIndicator();
+            updateButtonStates();
         }
     }
 
     // Progressively appends a live event (e.g. from live HLS playback)
     // without disturbing simulation playback controls or skipping in-progress steps.
     function appendLiveEvent(newEvent) {
-        newEvent.step = events.length + 1;
-        events.push(newEvent);
+        newEvent.step = applicationEvents.length + 1;
+        applicationEvents.push(newEvent);
 
-        if (currentIndex === -1) {
-            currentIndex = 0;
-            showCurrentEvent();
-            startAutoPlay();
+        if (applicationIndex === -1) {
+            applicationIndex = 0;
+            if (activeView === "application") {
+                showCurrentEvent();
+                startAutoPlay();
+            }
         } else if (playTimer || isPaused) {
-            // Auto-play is currently stepping through earlier events (such as Live DNS
-            // Query/Response -> Manifest Request/Response) or playback is paused.
-            // Keep the current event visible so it is not skipped; scheduleNextStep()
-            // will naturally advance through each queued event in order.
             updateStepIndicator();
             updateButtonStates();
-        } else if (liveFollow && currentIndex < events.length - 1) {
-            currentIndex += 1;
-            showCurrentEvent();
-            startAutoPlay();
+        } else if (liveFollow && applicationIndex < applicationEvents.length - 1) {
+            applicationIndex += 1;
+            if (activeView === "application") {
+                showCurrentEvent();
+                startAutoPlay();
+            }
         } else {
             updateStepIndicator();
             updateButtonStates();
@@ -631,26 +913,42 @@ const Visualizer = (() => {
 
     function goNext() {
         stopAutoPlay(false); // manual stepping takes over from auto-play
-        if (currentIndex < events.length - 1) {
-            currentIndex += 1;
-            if (currentIndex === events.length - 1) {
-                liveFollow = true;
+        if (activeView === "application") {
+            if (applicationIndex < applicationEvents.length - 1) {
+                applicationIndex += 1;
+                if (applicationIndex === applicationEvents.length - 1) {
+                    liveFollow = true;
+                }
+                showCurrentEvent();
             }
-            showCurrentEvent();
+        } else {
+            if (transportIndex < transportEvents.length - 1) {
+                transportIndex += 1;
+                showCurrentEvent();
+            }
         }
     }
 
     function goPrevious() {
         stopAutoPlay(false);
-        if (currentIndex > 0) {
-            liveFollow = false;
-            currentIndex -= 1;
-            showCurrentEvent();
+        if (activeView === "application") {
+            if (applicationIndex > 0) {
+                liveFollow = false;
+                applicationIndex -= 1;
+                showCurrentEvent();
+            }
+        } else {
+            if (transportIndex > 0) {
+                transportIndex -= 1;
+                showCurrentEvent();
+            }
         }
     }
 
     function togglePause() {
-        if (events.length === 0) return;
+        const evts = getCurrentEvents();
+        const idx = getCurrentIndex();
+        if (evts.length === 0) return;
 
         if (playTimer) {
             // Currently auto-playing: pause timer and freeze CSS animation in place
@@ -660,7 +958,7 @@ const Visualizer = (() => {
         } else if (isPaused) {
             // Currently paused: resume CSS animation from paused visual state and continue timer
             scheduleNextStep(remainingStepMs);
-        } else if (currentIndex < events.length - 1) {
+        } else if (idx < evts.length - 1) {
             // Stopped manually before the end: resume auto-play
             scheduleNextStep(STEP_DELAY_MS);
         } else {
@@ -672,9 +970,14 @@ const Visualizer = (() => {
     }
 
     function replay() {
-        if (events.length === 0) return;
+        const evts = getCurrentEvents();
+        if (evts.length === 0) return;
         stopAutoPlay(false);
-        currentIndex = 0;
+        if (activeView === "application") {
+            applicationIndex = 0;
+        } else {
+            transportIndex = 0;
+        }
         showCurrentEvent();
         startAutoPlay();
     }
@@ -682,11 +985,24 @@ const Visualizer = (() => {
     // Clears the panel back to its "waiting" placeholder and drops any
     // loaded events.
     function reset() {
-        events = [];
-        currentIndex = -1;
+        applicationEvents = [];
+        transportEvents = [];
+        applicationIndex = -1;
+        transportIndex = -1;
+        activeView = "application";
         liveFollow = true;
         stopAutoPlay(false);
-        eventBox.innerHTML = '<p class="placeholder-note">Waiting for an activity on the left panel&hellip;</p>';
+
+        if (tabBtnApp) {
+            tabBtnApp.classList.add("protocol-view-tab--active");
+            tabBtnApp.setAttribute("aria-selected", "true");
+        }
+        if (tabBtnTrans) {
+            tabBtnTrans.classList.remove("protocol-view-tab--active");
+            tabBtnTrans.setAttribute("aria-selected", "false");
+        }
+
+        renderPlaceholder();
         updateStepIndicator();
         updateButtonStates();
     }
@@ -696,5 +1012,12 @@ const Visualizer = (() => {
     btnPause.addEventListener("click", togglePause);
     btnReplay.addEventListener("click", replay);
 
-    return { loadEvents, appendLiveEvent, reset };
+    if (tabBtnApp) {
+        tabBtnApp.addEventListener("click", () => setView("application"));
+    }
+    if (tabBtnTrans) {
+        tabBtnTrans.addEventListener("click", () => setView("transport"));
+    }
+
+    return { loadEvents, appendLiveEvent, reset, setView };
 })();

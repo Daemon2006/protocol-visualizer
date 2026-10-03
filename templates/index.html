@@ -282,6 +282,32 @@
             </div>
 
             <div class="panel__body">
+                <!-- View selector tabs: switch between Application Layer and Transport Layer -->
+                <div class="protocol-view-tabs" id="protocol-view-tabs" role="tablist" aria-label="Protocol Layer View">
+                    <button
+                        type="button"
+                        class="protocol-view-tab protocol-view-tab--active"
+                        role="tab"
+                        id="protocol-view-application"
+                        aria-selected="true"
+                        aria-controls="protocol-event"
+                        data-view="application"
+                    >
+                        Application Layer
+                    </button>
+                    <button
+                        type="button"
+                        class="protocol-view-tab"
+                        role="tab"
+                        id="protocol-view-transport"
+                        aria-selected="false"
+                        aria-controls="protocol-event"
+                        data-view="transport"
+                    >
+                        Transport Layer
+                    </button>
+                </div>
+
                 <!-- Shows "Step X of Y" so the user always knows their position -->
                 <div class="protocol-step-indicator" id="protocol-step-indicator">
                     Step 0 of 0

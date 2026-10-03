@@ -1493,6 +1493,127 @@ a:focus-visible {
     cursor: not-allowed;
 }
 
+/* ---------- Protocol view tabs (Application Layer vs Transport Layer) ---------- */
+.protocol-view-tabs {
+    display: flex;
+    gap: 0.35rem;
+    padding: 0.3rem;
+    background: var(--color-surface-deep);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    margin-bottom: 0.25rem;
+}
+
+.protocol-view-tab {
+    flex: 1;
+    font-family: var(--font-sans);
+    font-size: 0.84rem;
+    font-weight: 600;
+    padding: 0.48rem 0.85rem;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--color-ink-soft);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    text-align: center;
+}
+
+.protocol-view-tab:hover {
+    color: var(--color-ink-bright);
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.protocol-view-tab--active {
+    background: var(--color-protocol);
+    border-color: var(--color-protocol);
+    color: #08101D;
+    box-shadow: 0 2px 10px rgba(52, 211, 153, 0.28);
+}
+
+.protocol-view-tab--active:hover {
+    color: #08101D;
+    background: var(--color-protocol);
+}
+
+/* Discrete TCP Transport Layer view styles */
+.transport-event-description {
+    margin: 0.3rem 0 0.6rem;
+    font-size: 0.82rem;
+    color: var(--color-ink-soft);
+    font-style: italic;
+    line-height: 1.4;
+}
+
+.transport-diagram--tcp-discrete {
+    margin-top: 0.75rem;
+}
+
+.transport-tcp-pill {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 600;
+    padding: 0.12rem 0.45rem;
+    border-radius: 4px;
+    background: var(--color-tcp-tint);
+    border: 1px solid var(--color-tcp-border);
+    color: var(--color-tcp);
+}
+
+.transport-flow-pill--tcp {
+    color: var(--color-tcp);
+    border-color: var(--color-tcp-border);
+    background: var(--color-tcp-tint);
+    font-weight: 700;
+}
+
+.transport-packet--discrete {
+    position: relative;
+}
+
+.transport-packet--discrete.transport-arrow--c2s {
+    opacity: 0;
+    animation: packetMoveRight 0.45s ease-out 0.05s forwards;
+}
+
+.transport-packet--discrete.transport-arrow--s2c {
+    opacity: 0;
+    animation: packetMoveLeft 0.45s ease-out 0.05s forwards;
+}
+
+/* Empty state notice for Transport Layer when no transport stream exists */
+.transport-layer--empty-state {
+    padding-bottom: 0.5rem;
+}
+
+.transport-empty-notice {
+    text-align: center;
+    padding: 2.2rem 1.5rem;
+    background: var(--color-surface);
+    border: 1px dashed var(--color-border);
+    border-radius: 8px;
+    color: var(--color-ink-soft);
+    margin-top: 0.5rem;
+}
+
+.transport-empty-notice__icon {
+    font-size: 1.8rem;
+    color: var(--color-activity);
+    margin-bottom: 0.5rem;
+}
+
+.transport-empty-notice h4 {
+    font-size: 0.98rem;
+    font-weight: 600;
+    color: var(--color-ink-bright);
+    margin: 0 0 0.4rem;
+}
+
+.transport-empty-notice p {
+    font-size: 0.82rem;
+    margin: 0.25rem 0;
+}
+
 /* ---------- Footer ---------- */
 .site-footer {
     text-align: center;

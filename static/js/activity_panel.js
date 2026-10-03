@@ -292,7 +292,7 @@ browsingForm.addEventListener("submit", async (event) => {
             } else {
                 setStatus(`Browsing simulation complete \u2014 visited ${data.domain} (${data.events.length} protocol steps).`);
             }
-            Visualizer.loadEvents(data.events);
+            Visualizer.loadEvents(data.events, data.transport_events || []);
         }
 
     } catch (err) {
@@ -355,13 +355,13 @@ mailForm.addEventListener("submit", async (event) => {
             addLogEntry(`Live email sent successfully to ${to} (${data.events.length} protocol steps)`);
             if (activeActivity === "mail") {
                 setStatus(`Live email sent successfully \u2014 delivered to ${to} (${data.events.length} protocol steps).`);
-                Visualizer.loadEvents(data.events);
+                Visualizer.loadEvents(data.events, data.transport_events || []);
             }
         } else {
             addLogEntry(`Sent mail to ${to} (${data.events.length} protocol steps)`);
             if (activeActivity === "mail") {
                 setStatus(`Mail simulation complete \u2014 sent to ${data.to} (${data.events.length} protocol steps).`);
-                Visualizer.loadEvents(data.events);
+                Visualizer.loadEvents(data.events, data.transport_events || []);
             }
         }
 
@@ -454,7 +454,7 @@ streamingForm.addEventListener("submit", async (event) => {
             addLogEntry(`Streamed at ${data.quality} (${data.events.length} protocol steps)`);
             if (activeActivity === "streaming") {
                 setStatus(`Streaming simulation complete at ${data.quality} (${data.events.length} protocol steps).`);
-                Visualizer.loadEvents(data.events);
+                Visualizer.loadEvents(data.events, data.transport_events || []);
             }
         } catch (err) {
             setStatus("Could not reach the server. Is the Flask app running?", true);
@@ -515,7 +515,7 @@ streamingForm.addEventListener("submit", async (event) => {
         addLogEntry(`Live stream DNS resolved: ${streamDomain} -> ${dnsData.events[1].fields["IP Address"]}`);
 
         // Seed the visualizer with the real DNS Query & Response events
-        Visualizer.loadEvents(dnsData.events);
+        Visualizer.loadEvents(dnsData.events, dnsData.transport_events || []);
 
     } catch (err) {
         setStatus("Could not reach Flask backend for DNS resolution.", true);
@@ -795,13 +795,13 @@ if (flowControlForm) {
                 addLogEntry(`Live ${variantName} complete \u2014 ${data.events.length} events`);
                 if (activeActivity === "flow-control" || activeActivity === "flowControl") {
                     setStatus(`Live Flow Control complete \u2014 ${variantLabel} (${data.events.length} steps via real UDP).`);
-                    Visualizer.loadEvents(data.events);
+                    Visualizer.loadEvents(data.events, data.transport_events || []);
                 }
             } else {
                 addLogEntry(`Simulation ${variantName} complete \u2014 ${data.events.length} events`);
                 if (activeActivity === "flow-control" || activeActivity === "flowControl") {
                     setStatus(`Flow control simulation complete \u2014 ${variantLabel} (${data.events.length} steps).`);
-                    Visualizer.loadEvents(data.events);
+                    Visualizer.loadEvents(data.events, data.transport_events || []);
                 }
             }
         } catch (err) {

@@ -33,6 +33,11 @@ from simulators.dns_sim import simulate_dns
 from simulators.http_sim import simulate_http
 from simulators.smtp_sim import simulate_mail
 from simulators.streaming_sim import simulate_streaming, SUPPORTED_QUALITIES
+from simulators.tcp_transport_sim import (
+    simulate_browsing_transport,
+    simulate_mail_transport,
+    simulate_streaming_transport,
+)
 from simulators.flow_control_sim import (
     simulate_stop_and_wait,
     simulate_stop_and_wait_arq,
@@ -94,6 +99,38 @@ def _parse_url(raw_url: str):
     return domain, path
 
 
+def _annotate_transport_events(transport_events, app_refs):
+    """
+    Attach application_ref metadata to simulated TCP transport events:
+      - Steps 1..3 (3-Way Handshake): 'connection-establish'
+      - Intermediate message pairs (PSH,ACK segment + receiver ACK): app_refs[i]
+      - Last 4 steps (4-Way Teardown): 'connection-teardown'
+    """
+    total = len(transport_events)
+    if total < 7:
+        for ev in transport_events:
+            ev.setdefault("application_ref", "transport")
+        return transport_events
+
+    for ev in transport_events[:3]:
+        ev["application_ref"] = "connection-establish"
+
+    pair_count = (total - 7) // 2
+    for i in range(pair_count):
+        ref = app_refs[i] if i < len(app_refs) else "data-transfer"
+        data_idx = 3 + (i * 2)
+        ack_idx = data_idx + 1
+        if data_idx < total - 4:
+            transport_events[data_idx]["application_ref"] = ref
+        if ack_idx < total - 4:
+            transport_events[ack_idx]["application_ref"] = ref
+
+    for ev in transport_events[-4:]:
+        ev["application_ref"] = "connection-teardown"
+
+    return transport_events
+
+
 @app.route("/api/simulate/browsing", methods=["POST"])
 def simulate_browsing():
     """
@@ -122,11 +159,23 @@ def simulate_browsing():
     for index, event in enumerate(events, start=1):
         event["step"] = index
 
+    # Extract HTTP application payloads and generate discrete TCP Transport Layer events
+    http_events = [e for e in events if e.get("protocol") == "HTTP"]
+    request_payload = http_events[0]["raw"] if len(http_events) > 0 else ""
+    response_payload = http_events[1]["raw"] if len(http_events) > 1 else ""
+
+    transport_events = simulate_browsing_transport(
+        request_payload=request_payload,
+        response_payload=response_payload,
+    )
+    _annotate_transport_events(transport_events, ["http-request", "http-response"])
+
     return jsonify({
         "activity": "browsing",
         "url": raw_url,
         "domain": domain,
         "events": events,
+        "transport_events": transport_events,
     })
 
 
@@ -289,11 +338,36 @@ def simulate_mail_route():
     for index, event in enumerate(events, start=1):
         event["step"] = index
 
+    # Extract SMTP application messages and generate corresponding TCP transport events
+    smtp_messages = [
+        (e["summary"], e["direction"], e["raw"])
+        for e in events
+        if e.get("protocol") == "SMTP"
+    ]
+    transport_events = simulate_mail_transport(messages=smtp_messages)
+    smtp_refs = [
+        "smtp-greeting",
+        "smtp-ehlo",
+        "smtp-ehlo-response",
+        "smtp-mail-from",
+        "smtp-mail-from-response",
+        "smtp-rcpt-to",
+        "smtp-rcpt-to-response",
+        "smtp-data",
+        "smtp-data-response",
+        "smtp-message-data",
+        "smtp-message-queued",
+        "smtp-quit",
+        "smtp-connection-closed",
+    ]
+    _annotate_transport_events(transport_events, smtp_refs)
+
     return jsonify({
         "activity": "mail",
         "to": to,
         "subject": subject,
         "events": events,
+        "transport_events": transport_events,
     })
 
 
@@ -375,10 +449,33 @@ def simulate_streaming_route():
     for index, event in enumerate(events, start=1):
         event["step"] = index
 
+    # Extract HTTP manifest and segment messages and generate corresponding TCP transport events
+    http_messages = [
+        (e["summary"], e["direction"], e["raw"])
+        for e in events
+        if e.get("protocol") == "HTTP"
+    ]
+    transport_events = simulate_streaming_transport(
+        segments=http_messages,
+        quality=quality,
+    )
+    streaming_refs = [
+        "manifest-request",
+        "manifest-response",
+        "segment-1-request",
+        "segment-1-response",
+        "segment-2-request",
+        "segment-2-response",
+        "segment-3-request",
+        "segment-3-response",
+    ]
+    _annotate_transport_events(transport_events, streaming_refs)
+
     return jsonify({
         "activity": "streaming",
         "quality": quality,
         "events": events,
+        "transport_events": transport_events,
     })
 
 

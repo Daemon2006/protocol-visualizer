@@ -823,7 +823,223 @@ class ProtocolVisualizerTests(unittest.TestCase):
         self.assertEqual(data_sim.get("activity"), "flow-control")
         self.assertNotEqual(data_sim.get("mode"), "live")
 
+    # =========================================================================
+    # 7. TRANSPORT LAYER ASSIGNMENT 2 TESTS
+    # =========================================================================
+    def test_simulation_browsing_transport_stream(self):
+        """Browsing Simulation returns 4 application events and 11 discrete TCP transport events."""
+        res = self.client.post("/api/simulate/browsing", json={"url": "example.com"})
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertEqual(len(data["events"]), 4)
+        self.assertIn("transport_events", data)
+        tb = data["transport_events"]
+        self.assertEqual(len(tb), 11)
+
+        # 3-Way Handshake
+        self.assertEqual([e["fields"]["Flags"] for e in tb[:3]], ["SYN", "SYN,ACK", "ACK"])
+        self.assertEqual([e["application_ref"] for e in tb[:3]], ["connection-establish"] * 3)
+
+        # HTTP GET Request & Server ACK
+        self.assertEqual(tb[3]["fields"]["Flags"], "PSH,ACK")
+        self.assertEqual(tb[3]["application_ref"], "http-request")
+        self.assertEqual(tb[4]["fields"]["Flags"], "ACK")
+        self.assertEqual(tb[4]["application_ref"], "http-request")
+
+        # HTTP Response & Client ACK
+        self.assertEqual(tb[5]["fields"]["Flags"], "PSH,ACK")
+        self.assertEqual(tb[5]["application_ref"], "http-response")
+        self.assertEqual(tb[6]["fields"]["Flags"], "ACK")
+        self.assertEqual(tb[6]["application_ref"], "http-response")
+
+        # 4-Way Teardown
+        self.assertEqual([e["fields"]["Flags"] for e in tb[-4:]], ["FIN,ACK", "ACK", "FIN,ACK", "ACK"])
+        self.assertEqual([e["application_ref"] for e in tb[-4:]], ["connection-teardown"] * 4)
+
+        # Conceptually verify DNS remains pure UDP application-layer lookup (not TCP handshake)
+        self.assertEqual(data["events"][0]["protocol"], "DNS")
+        self.assertEqual(data["events"][0]["transport"], "UDP")
+        self.assertNotIn("application_ref", data["events"][0])
+
+    def test_simulation_mail_transport_stream(self):
+        """Mail Simulation returns 15 application events and 33 discrete TCP transport events."""
+        res = self.client.post(
+            "/api/simulate/mail",
+            json={"to": "bob@example.com", "subject": "Test", "body": "Message"}
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertEqual(len(data["events"]), 15)
+        self.assertIn("transport_events", data)
+        tm = data["transport_events"]
+        self.assertEqual(len(tm), 33)
+
+        # Handshake
+        self.assertEqual([e["fields"]["Flags"] for e in tm[:3]], ["SYN", "SYN,ACK", "ACK"])
+        self.assertEqual([e["application_ref"] for e in tm[:3]], ["connection-establish"] * 3)
+
+        # All 13 SMTP messages must be represented as TCP PSH,ACK segments + ACKs (26 events)
+        smtp_data_events = [e for e in tm[3:-4] if e["fields"]["Flags"] == "PSH,ACK"]
+        self.assertEqual(len(smtp_data_events), 13)
+        for ev in tm[3:-4]:
+            self.assertTrue(ev["application_ref"].startswith("smtp-"))
+
+        # Teardown
+        self.assertEqual([e["fields"]["Flags"] for e in tm[-4:]], ["FIN,ACK", "ACK", "FIN,ACK", "ACK"])
+        self.assertEqual([e["application_ref"] for e in tm[-4:]], ["connection-teardown"] * 4)
+
+    def test_simulation_streaming_transport_stream(self):
+        """Streaming Simulation returns 10 application events and 23 discrete TCP transport events."""
+        res = self.client.post("/api/simulate/streaming", json={"quality": "720p"})
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertEqual(len(data["events"]), 10)
+        self.assertIn("transport_events", data)
+        ts = data["transport_events"]
+        self.assertEqual(len(ts), 23)
+
+        # Handshake
+        self.assertEqual([e["fields"]["Flags"] for e in ts[:3]], ["SYN", "SYN,ACK", "ACK"])
+        self.assertEqual([e["application_ref"] for e in ts[:3]], ["connection-establish"] * 3)
+
+        # Manifest and 3 Segment request/response exchanges
+        self.assertEqual(ts[3]["application_ref"], "manifest-request")
+        self.assertEqual(ts[5]["application_ref"], "manifest-response")
+        self.assertEqual(ts[7]["application_ref"], "segment-1-request")
+        self.assertEqual(ts[9]["application_ref"], "segment-1-response")
+        self.assertEqual(ts[11]["application_ref"], "segment-2-request")
+        self.assertEqual(ts[13]["application_ref"], "segment-2-response")
+        self.assertEqual(ts[15]["application_ref"], "segment-3-request")
+        self.assertEqual(ts[17]["application_ref"], "segment-3-response")
+
+        # Teardown
+        self.assertEqual([e["fields"]["Flags"] for e in ts[-4:]], ["FIN,ACK", "ACK", "FIN,ACK", "ACK"])
+        self.assertEqual([e["application_ref"] for e in ts[-4:]], ["connection-teardown"] * 4)
+
+    def test_tcp_correctness_and_arithmetic(self):
+        """Verify RFC 793 sequence numbers, ACK calculations, length, and flag state arithmetic."""
+        res_b = self.client.post("/api/simulate/browsing", json={"url": "example.com"})
+        res_m = self.client.post("/api/simulate/mail", json={"to": "a@b.com", "subject": "S", "body": "B"})
+        res_s = self.client.post("/api/simulate/streaming", json={"quality": "1080p"})
+
+        for stream in [res_b.get_json()["transport_events"], res_m.get_json()["transport_events"], res_s.get_json()["transport_events"]]:
+            # SYN: Seq = client ISN, Ack = 0, Length = 0
+            syn = stream[0]
+            c_isn = syn["fields"]["Seq"]
+            self.assertEqual(syn["fields"]["Ack"], 0)
+            self.assertEqual(syn["fields"]["Length"], 0)
+            self.assertEqual(syn["fields"]["Flags"], "SYN")
+
+            # SYN-ACK: Seq = server ISN, Ack = client ISN + 1, Length = 0
+            syn_ack = stream[1]
+            s_isn = syn_ack["fields"]["Seq"]
+            self.assertEqual(syn_ack["fields"]["Ack"], c_isn + 1)
+            self.assertEqual(syn_ack["fields"]["Length"], 0)
+            self.assertEqual(syn_ack["fields"]["Flags"], "SYN,ACK")
+
+            # Final Handshake ACK: Seq = client ISN + 1, Ack = server ISN + 1, Length = 0
+            f_ack = stream[2]
+            self.assertEqual(f_ack["fields"]["Seq"], c_isn + 1)
+            self.assertEqual(f_ack["fields"]["Ack"], s_isn + 1)
+            self.assertEqual(f_ack["fields"]["Length"], 0)
+            self.assertEqual(f_ack["fields"]["Flags"], "ACK")
+
+            # Data segment advances Seq by payload length; Receiver ACK matches sender Seq + length
+            pair_count = (len(stream) - 7) // 2
+            for i in range(pair_count):
+                d_ev = stream[3 + i * 2]
+                a_ev = stream[3 + i * 2 + 1]
+                self.assertEqual(d_ev["fields"]["Flags"], "PSH,ACK")
+                d_len = d_ev["fields"]["Length"]
+                self.assertGreater(d_len, 0)
+                self.assertEqual(a_ev["fields"]["Flags"], "ACK")
+                self.assertEqual(a_ev["fields"]["Length"], 0)
+                self.assertEqual(a_ev["fields"]["Ack"], d_ev["fields"]["Seq"] + d_len)
+
+            # Teardown: FIN advances sender Seq by exactly 1
+            fin1 = stream[-4]
+            ack1 = stream[-3]
+            fin2 = stream[-2]
+            ack2 = stream[-1]
+            self.assertEqual(fin1["fields"]["Flags"], "FIN,ACK")
+            self.assertEqual(ack1["fields"]["Flags"], "ACK")
+            self.assertEqual(fin2["fields"]["Flags"], "FIN,ACK")
+            self.assertEqual(ack2["fields"]["Flags"], "ACK")
+            self.assertEqual(ack1["fields"]["Ack"], fin1["fields"]["Seq"] + 1)
+            self.assertEqual(ack2["fields"]["Ack"], fin2["fields"]["Seq"] + 1)
+
+    def test_tcp_transport_event_schema(self):
+        """Verify every TCP transport event satisfies the visualizer schema, sequential steps, and monotonicity."""
+        schema_keys = {
+            "step", "layer", "protocol", "transport", "direction",
+            "summary", "raw", "fields", "highlight", "timing_ms", "application_ref"
+        }
+        res_b = self.client.post("/api/simulate/browsing", json={"url": "example.com"})
+        res_m = self.client.post("/api/simulate/mail", json={"to": "a@b.com", "subject": "S", "body": "B"})
+        res_s = self.client.post("/api/simulate/streaming", json={"quality": "360p"})
+
+        for stream in [res_b.get_json()["transport_events"], res_m.get_json()["transport_events"], res_s.get_json()["transport_events"]]:
+            prev_timing = -1
+            for idx, ev in enumerate(stream, start=1):
+                self.assertTrue(schema_keys.issubset(ev.keys()), f"Missing keys in {ev}")
+                self.assertEqual(ev["layer"], "transport")
+                self.assertEqual(ev["protocol"], "TCP")
+                self.assertEqual(ev["transport"], "TCP")
+                self.assertIn(ev["direction"], ("client-to-server", "server-to-client"))
+                self.assertEqual(ev["step"], idx)
+                self.assertGreaterEqual(ev["timing_ms"], prev_timing)
+                prev_timing = ev["timing_ms"]
+
+                f = ev["fields"]
+                for fk in ["Seq", "Ack", "Win", "Flags", "Length", "Client State", "Server State", "TCP State"]:
+                    self.assertIn(fk, f)
+                self.assertIsInstance(f["Seq"], int)
+                self.assertIsInstance(f["Ack"], int)
+                self.assertIsInstance(f["Win"], int)
+                self.assertIsInstance(f["Length"], int)
+
+    def test_view_switching_dom_and_tab_states(self):
+        """Verify DOM elements, IDs, and initial tab states for Application vs Transport Layer views."""
+        res = self.client.get("/")
+        self.assertEqual(res.status_code, 200)
+        html = res.get_data(as_text=True)
+
+        self.assertIn('id="protocol-view-tabs"', html)
+        self.assertIn('id="protocol-view-application"', html)
+        self.assertIn('id="protocol-view-transport"', html)
+
+        # Count view tab buttons
+        view_tabs = re.findall(r'class="[^"]*\bprotocol-view-tab\b[^"]*"', html)
+        self.assertEqual(len(view_tabs), 2, f"Expected exactly 2 protocol-view-tab buttons, got {len(view_tabs)}")
+
+        # Application tab is active & aria-selected="true"
+        app_match = re.search(r'<button[^>]*id="protocol-view-application"[^>]*>', html)
+        self.assertIsNotNone(app_match)
+        app_tag = app_match.group(0)
+        self.assertIn('aria-selected="true"', app_tag)
+        self.assertIn('protocol-view-tab--active', app_tag)
+
+        # Transport tab is unselected & aria-selected="false"
+        trans_match = re.search(r'<button[^>]*id="protocol-view-transport"[^>]*>', html)
+        self.assertIsNotNone(trans_match)
+        trans_tag = trans_match.group(0)
+        self.assertIn('aria-selected="false"', trans_tag)
+        self.assertNotIn('protocol-view-tab--active', trans_tag)
+
+    def test_flow_control_transport_safety(self):
+        """Verify Flow Control remains DATA LINK layer and is never classified as TCP."""
+        for endpoint in ["/api/simulate/flow-control", "/api/live/flow-control"]:
+            res = self.client.post(endpoint, json={"variant": "stop-and-wait"})
+            self.assertEqual(res.status_code, 200)
+            data = res.get_json()
+            # Transport events stream should not be returned or empty
+            self.assertTrue("transport_events" not in data or len(data.get("transport_events") or []) == 0)
+            for ev in data["events"]:
+                self.assertEqual(ev["transport"], "DATA LINK")
+                self.assertEqual(ev["protocol"], "STOP-AND-WAIT")
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
