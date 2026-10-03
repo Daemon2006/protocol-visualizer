@@ -206,6 +206,19 @@
                 <!-- Flow Control form panel (Stop-and-Wait and Stop-and-Wait ARQ) -->
                 <div class="activity-form-panel activity-form-panel--hidden" id="flow-control-panel" role="tabpanel" aria-labelledby="tab-flow-control">
                     <form id="flow-control-form" class="activity-form" autocomplete="off">
+                        <!-- Simulation/Live mode selector for Flow Control -->
+                        <div class="mode-toggle" role="radiogroup" aria-label="Flow control mode">
+                            <label class="mode-toggle__option" for="flow-mode-simulation">
+                                <input type="radio" name="flow-mode" id="flow-mode-simulation" value="simulation" checked>
+                                Simulation
+                            </label>
+                            <label class="mode-toggle__option" for="flow-mode-live">
+                                <input type="radio" name="flow-mode" id="flow-mode-live" value="live">
+                                Live (real UDP sockets)
+                            </label>
+                        </div>
+                        <p id="flow-mode-note" class="field-note" style="margin-top: -0.5rem; margin-bottom: 0.85rem;">Deterministic offline Flow Control simulation.</p>
+
                         <!-- Protocol Variant Selection: Stop-and-Wait vs Stop-and-Wait ARQ -->
                         <div class="mode-toggle" role="radiogroup" aria-label="Flow control variant">
                             <label class="mode-toggle__option" for="flow-variant-stop-and-wait">

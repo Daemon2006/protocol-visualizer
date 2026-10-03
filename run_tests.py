@@ -16,6 +16,7 @@ from app import app
 from live.smtp_live import send_live_mail, is_smtp_configured, SMTPLiveError
 from live.dns_live import resolve_domain, DNSLookupError
 from live.http_live import _ip_is_blocked
+from live.flow_control_live import LiveFlowControlError
 
 
 class ProtocolVisualizerTests(unittest.TestCase):
@@ -569,6 +570,258 @@ class ProtocolVisualizerTests(unittest.TestCase):
                 self.assertIsInstance(evt["fields"], dict)
                 self.assertIsInstance(evt["highlight"], list)
                 self.assertIsInstance(evt["timing_ms"], (int, float))
+
+    # =========================================================================
+    # 6. LIVE FLOW CONTROL TESTS
+    # =========================================================================
+    def test_live_flow_control_stop_and_wait(self):
+        """Live Stop-and-Wait over real OS UDP sockets must return 8 events with alternating bits 0->1->0->1."""
+        res = self.client.post(
+            "/api/live/flow-control",
+            json={"variant": "stop-and-wait", "frame_count": 4, "scenario": "normal"}
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertEqual(data["activity"], "flow-control")
+        self.assertEqual(data["mode"], "live")
+        self.assertEqual(data["variant"], "stop-and-wait")
+        events = data["events"]
+        self.assertEqual(len(events), 8)
+
+        expected_summaries = [
+            "Frame 0 Transmitted (Seq 0)",
+            "ACK 0 Received",
+            "Frame 1 Transmitted (Seq 1)",
+            "ACK 1 Received",
+            "Frame 2 Transmitted (Seq 0)",
+            "ACK 0 Received",
+            "Frame 3 Transmitted (Seq 1)",
+            "ACK 1 Received",
+        ]
+        self.assertEqual([e["summary"] for e in events], expected_summaries)
+        self.assertEqual([e["step"] for e in events], list(range(1, 9)))
+        self.assertEqual(set(e["protocol"] for e in events), {"STOP-AND-WAIT"})
+        self.assertEqual(set(e["transport"] for e in events), {"DATA LINK"})
+
+        for i in range(4):
+            frame_event = events[i * 2]
+            ack_event = events[i * 2 + 1]
+            expected_seq = str(i % 2)
+
+            self.assertEqual(frame_event["direction"], "client-to-server")
+            self.assertEqual(frame_event["fields"]["Seq No"], expected_seq)
+            self.assertEqual(frame_event["fields"]["Ack No"], "-")
+            self.assertIn("Local Endpoint", frame_event["fields"])
+
+            self.assertEqual(ack_event["direction"], "server-to-client")
+            self.assertEqual(ack_event["fields"]["Seq No"], "-")
+            self.assertEqual(ack_event["fields"]["Ack No"], expected_seq)
+            self.assertIn("Local Endpoint", ack_event["fields"])
+
+    def test_live_flow_control_arq_normal(self):
+        """Live Stop-and-Wait ARQ Normal over real UDP sockets must return 8 events with alternating 0/1 sequence."""
+        res = self.client.post(
+            "/api/live/flow-control",
+            json={"variant": "stop-and-wait-arq", "frame_count": 4, "scenario": "normal"}
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertEqual(data["activity"], "flow-control")
+        self.assertEqual(data["mode"], "live")
+        self.assertEqual(data["variant"], "stop-and-wait-arq")
+        events = data["events"]
+        self.assertEqual(len(events), 8)
+        self.assertEqual(set(e["protocol"] for e in events), {"SW-ARQ"})
+        self.assertEqual(set(e["transport"] for e in events), {"DATA LINK"})
+
+        for i in range(4):
+            frame_evt = events[i * 2]
+            ack_evt = events[i * 2 + 1]
+            exp_seq = str(i % 2)
+            self.assertEqual(frame_evt["fields"]["Seq No"], exp_seq)
+            self.assertEqual(ack_evt["fields"]["Ack No"], exp_seq)
+
+    def test_live_flow_control_arq_frame_loss(self):
+        """Live ARQ Frame Loss over real sockets must show frame loss, socket timeout, retransmission, and recovery."""
+        res = self.client.post(
+            "/api/live/flow-control",
+            json={"variant": "stop-and-wait-arq", "frame_count": 4, "scenario": "frame_loss"}
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertEqual(data["mode"], "live")
+        events = data["events"]
+        summaries = [e["summary"] for e in events]
+
+        # Verify semantic order: Frame 1 Lost in Transit -> Timeout Waiting for ACK 1 -> Retransmitting Frame 1 -> ACK 1 Received
+        self.assertIn("Frame 1 Lost in Transit", summaries)
+        self.assertIn("Timeout Waiting for ACK 1", summaries)
+        self.assertIn("Retransmitting Frame 1", summaries)
+        self.assertIn("ACK 1 Received", summaries)
+
+        loss_idx = summaries.index("Frame 1 Lost in Transit")
+        timeout_idx = summaries.index("Timeout Waiting for ACK 1")
+        retrans_idx = summaries.index("Retransmitting Frame 1")
+        ack_idx = summaries.index("ACK 1 Received")
+
+        self.assertTrue(loss_idx < timeout_idx < retrans_idx < ack_idx)
+
+        # Structured field assertions
+        lost_evt = events[loss_idx]
+        self.assertEqual(lost_evt["fields"]["Seq No"], "1")
+
+        timeout_evt = events[timeout_idx]
+        self.assertEqual(timeout_evt["fields"]["Timer"], "Expired")
+        self.assertEqual(timeout_evt["fields"]["Sender State"], "TIMEOUT_EXPIRED")
+
+        retrans_evt = events[retrans_idx]
+        self.assertEqual(retrans_evt["fields"]["Seq No"], "1")
+
+        recovery_evt = events[ack_idx]
+        self.assertEqual(recovery_evt["fields"]["Ack No"], "1")
+        self.assertEqual(recovery_evt["fields"]["Sender State"], "READY_FOR_NEXT")
+
+    def test_live_flow_control_arq_ack_loss(self):
+        """Live ARQ ACK Loss over real sockets must verify lost ACK, timeout, duplicate detection, discard, and re-ACK."""
+        res = self.client.post(
+            "/api/live/flow-control",
+            json={"variant": "stop-and-wait-arq", "frame_count": 4, "scenario": "ack_loss"}
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertEqual(data["mode"], "live")
+        events = data["events"]
+        summaries = [e["summary"] for e in events]
+
+        self.assertIn("ACK 1 Lost in Transit", summaries)
+        self.assertIn("Timeout Waiting for ACK 1", summaries)
+        self.assertIn("Retransmitting Frame 1", summaries)
+        self.assertIn("Duplicate Frame 1 Detected", summaries)
+        self.assertIn("Duplicate Discarded", summaries)
+        self.assertIn("ACK 1 Re-sent", summaries)
+        self.assertIn("ACK 1 Received", summaries)
+
+        ack_loss_idx = summaries.index("ACK 1 Lost in Transit")
+        timeout_idx = summaries.index("Timeout Waiting for ACK 1")
+        retrans_idx = summaries.index("Retransmitting Frame 1")
+        dup_detect_idx = summaries.index("Duplicate Frame 1 Detected")
+        dup_discard_idx = summaries.index("Duplicate Discarded")
+        re_ack_idx = summaries.index("ACK 1 Re-sent")
+        recovery_idx = summaries.index("ACK 1 Received")
+
+        self.assertTrue(
+            ack_loss_idx < timeout_idx < retrans_idx < dup_detect_idx < dup_discard_idx < re_ack_idx < recovery_idx
+        )
+
+        retrans_evt = events[retrans_idx]
+        self.assertEqual(retrans_evt["fields"]["Seq No"], "1")
+
+        dup_evt = events[dup_detect_idx]
+        self.assertEqual(dup_evt["fields"]["Receiver State"], "DUPLICATE_DETECTED")
+
+        discard_evt = events[dup_discard_idx]
+        self.assertEqual(discard_evt["fields"]["Receiver State"], "DUPLICATE_DISCARDED")
+
+        re_ack_evt = events[re_ack_idx]
+        self.assertEqual(re_ack_evt["fields"]["Ack No"], "1")
+
+        recovery_evt = events[recovery_idx]
+        self.assertEqual(recovery_evt["fields"]["Ack No"], "1")
+        self.assertEqual(recovery_evt["fields"]["Sender State"], "READY_FOR_NEXT")
+
+    def test_live_flow_control_arq_delayed_ack(self):
+        """Live ARQ Delayed ACK over real sockets must show timeout, retransmission, duplicate handling, and recovery."""
+        res = self.client.post(
+            "/api/live/flow-control",
+            json={"variant": "stop-and-wait-arq", "frame_count": 4, "scenario": "delayed_ack"}
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertEqual(data["mode"], "live")
+        events = data["events"]
+        summaries = [e["summary"] for e in events]
+
+        has_timeout = any("timeout" in s.lower() or e["fields"].get("Timer") == "Expired" for e, s in zip(events, summaries))
+        has_retrans = any("retransmitting" in s.lower() for s in summaries)
+        has_duplicate = any("duplicate" in s.lower() and "detected" in s.lower() for s in summaries)
+        has_discard = any("discard" in s.lower() for s in summaries)
+        has_recovery = any("ack 1 received" in s.lower() for s in summaries)
+
+        self.assertTrue(has_timeout, "Expected timeout event in delayed ACK scenario")
+        self.assertTrue(has_retrans, "Expected retransmission event in delayed ACK scenario")
+        self.assertTrue(has_duplicate, "Expected duplicate detection in delayed ACK scenario")
+        self.assertTrue(has_discard, "Expected duplicate discard in delayed ACK scenario")
+        self.assertTrue(has_recovery, "Expected ACK recovery in delayed ACK scenario")
+
+        retrans_evts = [e for e in events if "retransmitting" in e["summary"].lower()]
+        self.assertTrue(len(retrans_evts) > 0)
+        self.assertEqual(retrans_evts[0]["fields"]["Seq No"], "1")
+
+    def test_live_flow_control_event_schema(self):
+        """Verify Live Flow Control events adhere strictly to schema, sequential steps, and DATA LINK transport."""
+        for variant in ["stop-and-wait", "stop-and-wait-arq"]:
+            res = self.client.post("/api/live/flow-control", json={"variant": variant, "frame_count": 4})
+            self.assertEqual(res.status_code, 200)
+            events = res.get_json()["events"]
+            expected_keys = {
+                "step", "protocol", "transport", "direction",
+                "summary", "raw", "fields", "highlight", "timing_ms"
+            }
+            expected_proto = "STOP-AND-WAIT" if variant == "stop-and-wait" else "SW-ARQ"
+
+            prev_timing = -1.0
+            for i, evt in enumerate(events, start=1):
+                self.assertTrue(expected_keys.issubset(evt.keys()), f"Event missing required schema keys: {evt}")
+                self.assertEqual(evt["step"], i, "Step numbers must be strictly sequential (1, 2, 3, ...)")
+                self.assertEqual(evt["protocol"], expected_proto)
+                self.assertEqual(evt["transport"], "DATA LINK", "Flow Control transport must be DATA LINK, not TCP/UDP")
+                self.assertIn(evt["direction"], ["client-to-server", "server-to-client"])
+                self.assertIsInstance(evt["fields"], dict)
+                self.assertIsInstance(evt["highlight"], list)
+                self.assertIsInstance(evt["timing_ms"], (int, float))
+                self.assertGreaterEqual(evt["timing_ms"], prev_timing, "timing_ms must be non-decreasing")
+                prev_timing = evt["timing_ms"]
+
+    def test_live_flow_control_invalid_inputs(self):
+        """Verify invalid Live Flow Control inputs return 400 with a descriptive JSON error."""
+        invalid_payloads = [
+            {"variant": "invalid"},
+            {},
+            {"variant": "stop-and-wait", "frame_count": 1},
+            {"variant": "stop-and-wait", "frame_count": 7},
+            {"variant": "stop-and-wait-arq", "scenario": "chaos"},
+        ]
+        for payload in invalid_payloads:
+            res = self.client.post("/api/live/flow-control", json=payload)
+            self.assertEqual(res.status_code, 400, f"Expected 400 for payload: {payload}")
+            self.assertTrue(res.is_json, f"Response should be JSON for payload: {payload}")
+            data = res.get_json()
+            self.assertIn("error", data, f"Missing 'error' field in response for payload: {payload}")
+            self.assertTrue(len(data["error"]) > 0)
+
+    def test_live_flow_control_socket_failure_handling(self):
+        """Live socket failures (LiveFlowControlError) must be converted into HTTP 502 with JSON error."""
+        with patch("app.live_stop_and_wait", side_effect=LiveFlowControlError("OS socket allocation failed")):
+            res = self.client.post("/api/live/flow-control", json={"variant": "stop-and-wait"})
+            self.assertEqual(res.status_code, 502)
+            self.assertTrue(res.is_json)
+            data = res.get_json()
+            self.assertIn("error", data)
+            self.assertEqual(data["error"], "OS socket allocation failed")
+
+    def test_live_and_simulation_flow_control_separation(self):
+        """Verify Live Flow Control returns mode == 'live' while Simulation does not."""
+        res_live = self.client.post("/api/live/flow-control", json={"variant": "stop-and-wait"})
+        self.assertEqual(res_live.status_code, 200)
+        data_live = res_live.get_json()
+        self.assertEqual(data_live.get("mode"), "live")
+        self.assertEqual(data_live.get("activity"), "flow-control")
+
+        res_sim = self.client.post("/api/simulate/flow-control", json={"variant": "stop-and-wait"})
+        self.assertEqual(res_sim.status_code, 200)
+        data_sim = res_sim.get_json()
+        self.assertEqual(data_sim.get("activity"), "flow-control")
+        self.assertNotEqual(data_sim.get("mode"), "live")
 
 
 if __name__ == "__main__":

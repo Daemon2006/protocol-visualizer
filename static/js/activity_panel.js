@@ -84,6 +84,21 @@ const KNOWN_EMBED_BLOCKED = [
     "apple.com", "yahoo"
 ];
 
+function resetFlowModeToDefault() {
+    const simRadio = document.getElementById("flow-mode-simulation");
+    if (simRadio) {
+        simRadio.checked = true;
+    }
+    const note = document.getElementById("flow-mode-note");
+    if (note) {
+        note.textContent = "Deterministic offline Flow Control simulation.";
+    }
+    const submitBtn = document.getElementById("flow-control-submit");
+    if (submitBtn) {
+        submitBtn.textContent = "Simulate Flow Control";
+    }
+}
+
 function switchActivity(activityName) {
     activeActivity = activityName;
 
@@ -101,6 +116,11 @@ function switchActivity(activityName) {
         const isSelected = name === activityName || (name === "flowControl" && activityName === "flow-control");
         panel.classList.toggle("activity-form-panel--hidden", !isSelected);
     });
+
+    if (activityName === "flow-control" || activityName === "flowControl") {
+        resetFlowModeToDefault();
+    }
+
     setStatus(defaultStatusForActivity[activityName] || "Select an activity to begin.");
 
     // Clear any leftover sequence from the previously selected activity
@@ -659,6 +679,9 @@ streamingForm.addEventListener("submit", async (event) => {
 // Flow Control Activity (Stop-and-Wait and Stop-and-Wait ARQ)
 // ---------------------------------------------------------------
 const flowControlForm = document.getElementById("flow-control-form");
+const flowModeSimulation = document.getElementById("flow-mode-simulation");
+const flowModeLive = document.getElementById("flow-mode-live");
+const flowModeNote = document.getElementById("flow-mode-note");
 const flowVariantSaw = document.getElementById("flow-variant-stop-and-wait");
 const flowVariantArq = document.getElementById("flow-variant-stop-and-wait-arq");
 const flowFrameCount = document.getElementById("flow-frame-count");
@@ -666,9 +689,35 @@ const flowArqScenario = document.getElementById("flow-arq-scenario");
 const flowArqScenarioGroup = document.getElementById("flow-arq-scenario-group");
 const flowControlSubmit = document.getElementById("flow-control-submit");
 
+function getFlowMode() {
+    const checked = document.querySelector('input[name="flow-mode"]:checked');
+    return checked ? checked.value : "simulation";
+}
+
 function getFlowVariant() {
     const checked = document.querySelector('input[name="flow-variant"]:checked');
     return checked ? checked.value : "stop-and-wait";
+}
+
+function updateFlowModeUI() {
+    const mode = getFlowMode();
+    const isLive = mode === "live";
+    if (flowModeNote) {
+        flowModeNote.textContent = isLive
+            ? "Uses real UDP sockets with live ACK, timeout, retransmission and duplicate handling."
+            : "Deterministic offline Flow Control simulation.";
+    }
+    if (flowControlSubmit) {
+        flowControlSubmit.textContent = isLive ? "Run Live Flow Control" : "Simulate Flow Control";
+    }
+    if (activeActivity === "flow-control" || activeActivity === "flowControl") {
+        setStatus(
+            isLive
+                ? "Live UDP Flow Control selected \u2014 real local UDP socket exchange."
+                : (defaultStatusForActivity["flow-control"] || "Select a protocol variant and click Simulate to begin.")
+        );
+        Visualizer.reset();
+    }
 }
 
 function updateFlowScenarioVisibility() {
@@ -682,6 +731,10 @@ function updateFlowScenarioVisibility() {
     }
 }
 
+document.querySelectorAll('input[name="flow-mode"]').forEach((radio) => {
+    radio.addEventListener("change", updateFlowModeUI);
+});
+
 if (flowVariantSaw) {
     flowVariantSaw.addEventListener("change", updateFlowScenarioVisibility);
 }
@@ -694,17 +747,28 @@ if (flowControlForm) {
     flowControlForm.addEventListener("submit", async (event) => {
         event.preventDefault();
 
+        const isLive = getFlowMode() === "live";
         const variant = getFlowVariant();
         const frameCount = parseInt(flowFrameCount.value, 10) || 4;
         const scenario = variant === "stop-and-wait-arq" ? flowArqScenario.value : "normal";
 
         flowControlSubmit.disabled = true;
+
+        const variantName = variant === "stop-and-wait-arq" ? "Stop-and-Wait ARQ" : "Stop-and-Wait";
         const variantLabel = variant === "stop-and-wait-arq" ? `Stop-and-Wait ARQ (${scenario})` : "Stop-and-Wait";
-        setStatus(`Simulating ${variantLabel} with ${frameCount} frames...`);
-        addLogEntry(`Flow Control: starting ${variant} simulation (${frameCount} frames, scenario: ${scenario})`);
+
+        if (isLive) {
+            setStatus("Starting Live Flow Control... Opening real UDP exchange...");
+            addLogEntry("Live Flow Control started \u2014 real UDP exchange");
+        } else {
+            setStatus("Starting Flow Control simulation...");
+            addLogEntry("Flow Control simulation started");
+        }
+
+        const endpoint = isLive ? "/api/live/flow-control" : "/api/simulate/flow-control";
 
         try {
-            const response = await fetch("/api/simulate/flow-control", {
+            const response = await fetch(endpoint, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -717,20 +781,35 @@ if (flowControlForm) {
             const data = await response.json();
 
             if (!response.ok) {
-                const errMsg = data.error || "Flow control simulation failed.";
-                setStatus(errMsg, true);
-                addLogEntry(`Error: ${errMsg}`);
+                const errMsg = data.error || (isLive ? "Live Flow Control socket error." : "Flow control simulation failed.");
+                const displayError = isLive ? `Live Flow Control failed: ${errMsg}` : errMsg;
+                setStatus(displayError, true);
+                addLogEntry(`Error: ${displayError}`);
+                if (isLive && (activeActivity === "flow-control" || activeActivity === "flowControl")) {
+                    Visualizer.reset();
+                }
                 return;
             }
 
-            addLogEntry(`Flow Control: received ${data.events.length} events for ${data.variant}`);
-            if (activeActivity === "flow-control" || activeActivity === "flowControl") {
-                setStatus(`Flow control simulation complete \u2014 ${variantLabel} (${data.events.length} steps).`);
-                Visualizer.loadEvents(data.events);
+            if (isLive) {
+                addLogEntry(`Live ${variantName} complete \u2014 ${data.events.length} events`);
+                if (activeActivity === "flow-control" || activeActivity === "flowControl") {
+                    setStatus(`Live Flow Control complete \u2014 ${variantLabel} (${data.events.length} steps via real UDP).`);
+                    Visualizer.loadEvents(data.events);
+                }
+            } else {
+                addLogEntry(`Simulation ${variantName} complete \u2014 ${data.events.length} events`);
+                if (activeActivity === "flow-control" || activeActivity === "flowControl") {
+                    setStatus(`Flow control simulation complete \u2014 ${variantLabel} (${data.events.length} steps).`);
+                    Visualizer.loadEvents(data.events);
+                }
             }
         } catch (err) {
-            setStatus("Could not reach the server. Is the Flask app running?", true);
-            addLogEntry(`Error: Could not reach the server.`);
+            const networkErrorMsg = isLive
+                ? "Live Flow Control failed: Could not reach the server. Is the Flask app running?"
+                : "Could not reach the server. Is the Flask app running?";
+            setStatus(networkErrorMsg, true);
+            addLogEntry(`Error: ${networkErrorMsg}`);
         } finally {
             flowControlSubmit.disabled = false;
         }

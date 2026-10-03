@@ -40,6 +40,11 @@ from simulators.flow_control_sim import (
 from live.dns_live import build_live_dns_events, DNSLookupError
 from live.http_live import build_live_http_events, HTTPRequestError
 from live.smtp_live import send_live_mail, is_smtp_configured, SMTPLiveError
+from live.flow_control_live import (
+    live_stop_and_wait,
+    live_stop_and_wait_arq,
+    LiveFlowControlError,
+)
 
 # Create the Flask application object.
 # __name__ tells Flask where to look for templates/ and static/ folders.
@@ -420,6 +425,58 @@ def simulate_flow_control_route():
 
     return jsonify({
         "activity": "flow-control",
+        "variant": variant,
+        "frame_count": frame_count,
+        "scenario": scenario,
+        "events": events,
+    })
+
+
+@app.route("/api/live/flow-control", methods=["POST"])
+def live_flow_control_route():
+    """
+    LIVE MODE API endpoint for Flow Control (Stop-and-Wait & Stop-and-Wait ARQ).
+
+    Transmits data frames and acknowledgments over real OS UDP sockets on loopback.
+
+    Expects a JSON body like:
+        {
+            "variant": "stop-and-wait",       # or "stop-and-wait-arq"
+            "frame_count": 4,                 # integer 2-6 (optional, default 4)
+            "scenario": "normal"              # "normal", "frame_loss", "ack_loss", "delayed_ack"
+        }
+
+    Validates inputs and calls the live socket module, returning
+    the ordered protocol event sequence for the visualizer.
+    """
+    data = request.get_json(silent=True) or {}
+
+    variant = (data.get("variant") or "").strip().lower()
+    if variant not in SUPPORTED_FLOW_VARIANTS:
+        return jsonify({
+            "error": f"Please choose a supported flow control variant: {', '.join(SUPPORTED_FLOW_VARIANTS)}."
+        }), 400
+
+    frame_count = data.get("frame_count", 4)
+    scenario = data.get("scenario")
+    if variant == "stop-and-wait":
+        scenario = scenario or "normal"
+    elif scenario is None:
+        scenario = "normal"
+
+    try:
+        if variant == "stop-and-wait":
+            events = live_stop_and_wait(frame_count)
+        else:
+            events = live_stop_and_wait_arq(frame_count, scenario)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except LiveFlowControlError as exc:
+        return jsonify({"error": str(exc)}), 502
+
+    return jsonify({
+        "activity": "flow-control",
+        "mode": "live",
         "variant": variant,
         "frame_count": frame_count,
         "scenario": scenario,
