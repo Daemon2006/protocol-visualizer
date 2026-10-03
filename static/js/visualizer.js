@@ -37,8 +37,12 @@ const Visualizer = (() => {
         return isClientToServer(direction) ? "client-to-server" : "server-to-client";
     }
 
-    function directionLabel(direction) {
-        return isClientToServer(direction) ? "Client \u2192 Server" : "Server \u2192 Client";
+    function directionLabel(direction, protocol) {
+        const isFlow = isFlowProtocol(protocol);
+        if (isClientToServer(direction)) {
+            return isFlow ? "Sender \u2192 Receiver" : "Client \u2192 Server";
+        }
+        return isFlow ? "Receiver \u2192 Sender" : "Server \u2192 Client";
     }
 
     // Escapes special HTML characters (<, >, &, quotes) in a value before
@@ -49,25 +53,297 @@ const Visualizer = (() => {
         return holder.innerHTML;
     }
 
-    // Maps an Application Layer protocol name to its badge color class.
+    function isFlowProtocol(protocol) {
+        return protocol === "STOP-AND-WAIT" || protocol === "SW-ARQ";
+    }
+
+    // Maps an Application / Flow Control Layer protocol name to its badge color class.
     function badgeClassFor(protocol) {
         if (protocol === "DNS") return "protocol-badge--dns";
         if (protocol === "SMTP") return "protocol-badge--smtp";
+        if (isFlowProtocol(protocol)) return "protocol-badge--flow";
         return "protocol-badge--http";
     }
 
-    // Maps a Transport Layer protocol name to its badge color class.
+    // Maps a Transport / Data Link Layer protocol name to its badge color class.
     function transportBadgeClassFor(transport) {
         if (transport === "TCP") return "transport-badge--tcp";
         if (transport === "UDP") return "transport-badge--udp";
+        if (transport === "DATA LINK") return "transport-badge--flow";
         return "transport-badge--unknown";
     }
 
-    // Determines the right-hand server endpoint label from the application protocol.
+    // Determines the left-hand source endpoint label.
+    function clientLabelFor(protocol) {
+        if (isFlowProtocol(protocol)) return "SENDER";
+        return "CLIENT";
+    }
+
+    // Determines the right-hand destination endpoint label from protocol.
     function serverLabelFor(protocol) {
         if (protocol === "DNS") return "DNS SERVER";
         if (protocol === "SMTP") return "MAIL SERVER";
+        if (isFlowProtocol(protocol)) return "RECEIVER";
         return "SERVER";
+    }
+
+    // Categorizes a flow control event into its semantic state
+    // using structured fields as primary signals and summary as fallback.
+    function getFlowEventCategory(event) {
+        if (!event) return null;
+        const protocol = event.protocol || "";
+        if (!isFlowProtocol(protocol)) return null;
+
+        const fields = event.fields || {};
+        const frameType = (fields["Frame Type"] || "").toLowerCase();
+        const senderState = (fields["Sender State"] || "").toLowerCase();
+        const receiverState = (fields["Receiver State"] || "").toLowerCase();
+        const status = (fields["Status"] || "").toLowerCase();
+        const timer = (fields["Timer"] || "").toLowerCase();
+        const summary = (event.summary || "").toLowerCase();
+
+        if (frameType.includes("lost") || status.includes("lost in transit") || summary.includes("lost in transit")) {
+            return "lost";
+        }
+        if (frameType.includes("timeout") || senderState.includes("timeout") || timer === "expired" || summary.includes("timeout")) {
+            return "timeout";
+        }
+        if (frameType.includes("retransmission") || status.includes("retransmitting") || summary.includes("retransmitting")) {
+            return "retransmission";
+        }
+        if (frameType.includes("duplicate discard") || receiverState.includes("duplicate_discarded") || summary.includes("duplicate discarded")) {
+            return "duplicate-discard";
+        }
+        if (frameType.includes("duplicate") || receiverState.includes("duplicate_detected") || summary.includes("duplicate frame")) {
+            return "duplicate";
+        }
+        if (frameType.includes("re-sent") || status.includes("re-sent") || summary.includes("re-sent")) {
+            return "ack-resend";
+        }
+        if (frameType.includes("ack") || (fields["Ack No"] && fields["Ack No"] !== "-") || summary.includes("ack")) {
+            return "ack";
+        }
+        if (frameType.includes("data") || (fields["Seq No"] && fields["Seq No"] !== "-") || summary.includes("frame")) {
+            return "data";
+        }
+        return "normal";
+    }
+
+    // Dedicated Data Link / Flow Control layer renderer (distinct from TCP/UDP).
+    function renderFlowControlLayer(event, index, clientLabel, serverLabel, arrowDirClass, arrowSymbol) {
+        const category = getFlowEventCategory(event);
+        const fields = event.fields || {};
+        const seq = fields["Seq No"] && fields["Seq No"] !== "-" ? fields["Seq No"] : "";
+        const ack = fields["Ack No"] && fields["Ack No"] !== "-" ? fields["Ack No"] : "";
+        const timerVal = fields["Timer"] || "";
+
+        let metaNote = "Stop-and-Wait Channel \u2022 Window Size = 1";
+        if (category === "lost") {
+            metaNote = "Frame Loss \u2022 Error in Channel";
+        } else if (category === "timeout") {
+            metaNote = "Timer Expired \u2022 Retransmit Triggered";
+        } else if (category === "retransmission") {
+            metaNote = `Retransmission \u2022 Seq ${seq || "1"} Unchanged`;
+        } else if (category === "duplicate") {
+            metaNote = "Duplicate Detected \u2022 Expected Seq Mismatch";
+        } else if (category === "duplicate-discard") {
+            metaNote = "Duplicate Discarded \u2022 Payload Dropped";
+        } else if (category === "ack-resend") {
+            metaNote = `ACK Recovery \u2022 Re-sent ACK ${ack || "1"}`;
+        } else if (category === "ack") {
+            metaNote = `ACK ${ack || "0"} Received \u2022 Window Sliding`;
+        } else if (category === "data") {
+            metaNote = `Data Frame (Seq ${seq || "0"}) \u2022 Window Size = 1`;
+        }
+
+        const timerPill = timerVal
+            ? `<span class="transport-flow-pill transport-flow-pill--timer">Timer: ${escapeHtml(timerVal)}</span>`
+            : "";
+
+        let alertBoxHtml = "";
+        let laneHtml = "";
+        let statusHtml = "";
+
+        if (category === "lost") {
+            const isLossC2S = isClientToServer(event.direction);
+            const lossText = isLossC2S ? `Frame ${seq || ""} Lost in Transit` : `ACK ${ack || ""} Lost in Transit`;
+            alertBoxHtml = `
+                <div class="transport-flow-alert transport-flow-alert--lost">
+                    <span class="transport-flow-alert__icon">&#x2716;</span>
+                    <div class="transport-flow-alert__body">
+                        <strong>FRAME DROPPED IN PHYSICAL CHANNEL</strong>
+                        <span>${escapeHtml(event.summary)}</span>
+                    </div>
+                </div>`;
+            laneHtml = `
+                <div class="transport-lane transport-lane--flow transport-lane--lost">
+                    <div class="transport-packet transport-packet--flow transport-packet--lost ${arrowDirClass}">
+                        <span class="transport-packet__label">${escapeHtml(lossText.toUpperCase())}</span>
+                        <div class="transport-packet__track">
+                            <span class="transport-packet__line">&#x2500;&#x2500;&#x2500; &#x2716; [TRANSMISSION LOST IN TRANSIT] &#x2500;&#x2500;&#x2500;</span>
+                        </div>
+                    </div>
+                </div>`;
+            statusHtml = `
+                <div class="transport-status transport-status--lost">
+                    ${isLossC2S
+                        ? "FRAME LOST IN TRANSIT \u2014 RECEIVER WAITING \u2022 SENDER TIMER RUNNING"
+                        : "ACK LOST IN REVERSE CHANNEL \u2014 SENDER WAITING UNTIL TIMEOUT"}
+                </div>`;
+        } else if (category === "timeout") {
+            alertBoxHtml = `
+                <div class="transport-flow-alert transport-flow-alert--timeout">
+                    <span class="transport-flow-alert__icon">&#x23F1;</span>
+                    <div class="transport-flow-alert__body">
+                        <strong>TIMEOUT EXPIRED: Waiting for ACK ${escapeHtml(seq || "1")}</strong>
+                        <span>Sender ACK timer expired (150ms elapsed) \u2014 triggering retransmission</span>
+                    </div>
+                </div>`;
+            laneHtml = `
+                <div class="transport-lane transport-lane--flow transport-lane--timeout">
+                    <div class="transport-packet transport-packet--flow transport-packet--timeout">
+                        <span class="transport-packet__label">SENDER TIMER EXPIRED &rarr; INITIATING RETRANSMISSION</span>
+                        <div class="transport-packet__track">
+                            <span class="transport-packet__line">&#x23F1; [TIMEOUT: TIMER EXPIRED (150ms)] &#x21BB;</span>
+                        </div>
+                    </div>
+                </div>`;
+            statusHtml = `
+                <div class="transport-status transport-status--timeout">
+                    TIMEOUT EXPIRED \u2014 SENDER ASSUMES FRAME OR ACK LOST \u2014 RETRANSMITTING
+                </div>`;
+        } else if (category === "retransmission") {
+            alertBoxHtml = `
+                <div class="transport-flow-alert transport-flow-alert--retransmission">
+                    <span class="transport-flow-alert__icon">&#x21BB;</span>
+                    <div class="transport-flow-alert__body">
+                        <strong>RETRANSMITTING FRAME (SEQ ${escapeHtml(seq || "1")})</strong>
+                        <span>Sequence number MUST remain unchanged (Seq ${escapeHtml(seq || "1")})</span>
+                    </div>
+                </div>`;
+            laneHtml = `
+                <div class="transport-lane transport-lane--flow transport-lane--retransmission">
+                    <div class="transport-packet transport-packet--flow transport-packet--retransmission ${arrowDirClass}">
+                        <span class="transport-packet__label">RETRANSMITTING FRAME: Seq ${escapeHtml(seq || "1")}</span>
+                        <div class="transport-packet__track">
+                            <span class="transport-packet__line">${arrowSymbol}</span>
+                        </div>
+                    </div>
+                </div>`;
+            statusHtml = `
+                <div class="transport-status transport-status--retransmission">
+                    RETRANSMISSION IN PROGRESS (SEQ ${escapeHtml(seq || "1")}) \u2014 TIMER RESTARTED
+                </div>`;
+        } else if (category === "duplicate") {
+            const exp = fields["Receiver State"] ? fields["Receiver State"].replace("EXPECT_", "") : "0";
+            alertBoxHtml = `
+                <div class="transport-flow-alert transport-flow-alert--duplicate">
+                    <span class="transport-flow-alert__icon">&#x26A0;</span>
+                    <div class="transport-flow-alert__body">
+                        <strong>DUPLICATE FRAME DETECTED</strong>
+                        <span>Received Seq ${escapeHtml(seq || "1")}, but Receiver expects Seq ${escapeHtml(exp)}</span>
+                    </div>
+                </div>`;
+            laneHtml = `
+                <div class="transport-lane transport-lane--flow transport-lane--duplicate">
+                    <div class="transport-packet transport-packet--flow transport-packet--duplicate">
+                        <span class="transport-packet__label">DUPLICATE DETECTED AT RECEIVER</span>
+                        <div class="transport-packet__track">
+                            <span class="transport-packet__line">&#x26A0; [DUPLICATE FRAME ${escapeHtml(seq || "1")} DETECTED] &#x26A0;</span>
+                        </div>
+                    </div>
+                </div>`;
+            statusHtml = `
+                <div class="transport-status transport-status--duplicate">
+                    DUPLICATE FRAME DETECTED BY RECEIVER \u2014 ALTERNATING BIT CHECK
+                </div>`;
+        } else if (category === "duplicate-discard") {
+            alertBoxHtml = `
+                <div class="transport-flow-alert transport-flow-alert--discard">
+                    <span class="transport-flow-alert__icon">&#x1F5D1;</span>
+                    <div class="transport-flow-alert__body">
+                        <strong>DUPLICATE PAYLOAD DISCARDED</strong>
+                        <span>Critical Rule: Data chunk is NOT delivered to upper network layer twice</span>
+                    </div>
+                </div>`;
+            laneHtml = `
+                <div class="transport-lane transport-lane--flow transport-lane--discard">
+                    <div class="transport-packet transport-packet--flow transport-packet--discard">
+                        <span class="transport-packet__label">PAYLOAD DISCARDED &rarr; PRESERVING DATA INTEGRITY</span>
+                        <div class="transport-packet__track">
+                            <span class="transport-packet__line">&#x1F5D1; [DUPLICATE DISCARDED \u2014 NOT DELIVERED TWICE]</span>
+                        </div>
+                    </div>
+                </div>`;
+            statusHtml = `
+                <div class="transport-status transport-status--discard">
+                    DUPLICATE DISCARDED \u2014 RECEIVER PREPARING RE-SENT ACK
+                </div>`;
+        } else if (category === "ack-resend") {
+            laneHtml = `
+                <div class="transport-lane transport-lane--flow">
+                    <div class="transport-packet transport-packet--flow transport-packet--ack-resend ${arrowDirClass}">
+                        <span class="transport-packet__label">ACK RE-SENT: ACK ${escapeHtml(ack || "1")} (Recovery)</span>
+                        <div class="transport-packet__track">
+                            <span class="transport-packet__line">${arrowSymbol}</span>
+                        </div>
+                    </div>
+                </div>`;
+            statusHtml = `
+                <div class="transport-status transport-status--ack-resend">
+                    ACK RE-SENT BY RECEIVER \u2014 SENDER RECOVERY IN PROGRESS
+                </div>`;
+        } else if (category === "ack") {
+            laneHtml = `
+                <div class="transport-lane transport-lane--flow">
+                    <div class="transport-packet transport-packet--flow ${arrowDirClass}">
+                        <span class="transport-packet__label">ACK FRAME: ACK ${escapeHtml(ack || "0")} (Delivered)</span>
+                        <div class="transport-packet__track">
+                            <span class="transport-packet__line">${arrowSymbol}</span>
+                        </div>
+                    </div>
+                </div>`;
+            statusHtml = `
+                <div class="transport-status transport-status--flow-ack">
+                    ACK RECEIVED \u2014 SENDER ADVANCING WINDOW &middot; TIMER STOPPED
+                </div>`;
+        } else {
+            laneHtml = `
+                <div class="transport-lane transport-lane--flow">
+                    <div class="transport-packet transport-packet--flow ${arrowDirClass}">
+                        <span class="transport-packet__label">DATA FRAME: Seq ${escapeHtml(seq || "0")} &middot; Window: 1</span>
+                        <div class="transport-packet__track">
+                            <span class="transport-packet__line">${arrowSymbol}</span>
+                        </div>
+                    </div>
+                </div>`;
+            statusHtml = `
+                <div class="transport-status transport-status--flow">
+                    FRAME IN TRANSIT \u2014 SENDER WAITING FOR ACK ${escapeHtml(seq || "0")}
+                </div>`;
+        }
+
+        return `
+            <div class="transport-layer transport-layer--flow">
+                <div class="protocol-layer-header">
+                    <span class="protocol-layer-title">DATA LINK / FLOW CONTROL</span>
+                    <span class="transport-badge ${transportBadgeClassFor("DATA LINK")}">DATA LINK</span>
+                    <span class="transport-meta-note">${escapeHtml(metaNote)}</span>
+                </div>
+                <div class="transport-diagram transport-diagram--flow">
+                    <div class="transport-endpoints">
+                        <span class="transport-endpoint transport-endpoint--sender">${escapeHtml(clientLabel)}</span>
+                        <div class="transport-flow-badges">
+                            <span class="transport-flow-pill">Window: 1</span>
+                            ${timerPill}
+                        </div>
+                        <span class="transport-endpoint transport-endpoint--receiver">${escapeHtml(serverLabel)}</span>
+                    </div>
+                    ${alertBoxHtml}
+                    ${laneHtml}
+                    ${statusHtml}
+                </div>
+            </div>`;
     }
 
     // Dynamically determines whether the event at `index` is the beginning
@@ -85,6 +361,7 @@ const Visualizer = (() => {
     // Reusable Transport Layer visualization component for TCP, UDP, or unspecified transport.
     function renderTransportLayer(event, index) {
         const transport = event && event.transport ? String(event.transport).toUpperCase() : "";
+        const clientLabel = clientLabelFor(event.protocol);
         const serverLabel = serverLabelFor(event.protocol);
         const c2s = isClientToServer(event.direction);
         const arrowDirClass = c2s ? "transport-arrow--c2s" : "transport-arrow--s2c";
@@ -101,6 +378,10 @@ const Visualizer = (() => {
                 </div>`;
         }
 
+        if (transport === "DATA LINK" || isFlowProtocol(event.protocol)) {
+            return renderFlowControlLayer(event, index, clientLabel, serverLabel, arrowDirClass, arrowSymbol);
+        }
+
         if (transport === "UDP") {
             return `
                 <div class="transport-layer transport-layer--udp">
@@ -111,7 +392,7 @@ const Visualizer = (() => {
                     </div>
                     <div class="transport-diagram">
                         <div class="transport-endpoints">
-                            <span class="transport-endpoint transport-endpoint--client">CLIENT</span>
+                            <span class="transport-endpoint transport-endpoint--client">${escapeHtml(clientLabel)}</span>
                             <span class="transport-endpoint transport-endpoint--server">${escapeHtml(serverLabel)}</span>
                         </div>
                         <div class="transport-udp-note">
@@ -150,7 +431,7 @@ const Visualizer = (() => {
                     </div>
                     <div class="transport-diagram">
                         <div class="transport-endpoints">
-                            <span class="transport-endpoint transport-endpoint--client">CLIENT</span>
+                            <span class="transport-endpoint transport-endpoint--client">${escapeHtml(clientLabel)}</span>
                             <span class="transport-endpoint transport-endpoint--server">${escapeHtml(serverLabel)}</span>
                         </div>
                         <div class="${handshakeClass}">
@@ -211,17 +492,22 @@ const Visualizer = (() => {
         const dirClass = directionClassFor(event.direction);
         const transportHtml = renderTransportLayer(event, index);
 
+        const category = getFlowEventCategory(event);
+        const statusClass = category ? ` protocol-message--${category}` : "";
+        const isFlow = isFlowProtocol(event.protocol);
+        const layerTitle = isFlow ? "DATA LINK / FLOW CONTROL" : "APPLICATION LAYER";
+
         eventBox.innerHTML = `
             <div class="protocol-layers">
                 <div class="application-layer">
                     <div class="protocol-layer-header">
-                        <span class="protocol-layer-title">APPLICATION LAYER</span>
+                        <span class="protocol-layer-title">${escapeHtml(layerTitle)}</span>
                         <span class="protocol-badge ${badgeClass}">${escapeHtml(event.protocol)}</span>
                     </div>
-                    <div class="protocol-message protocol-message--${dirClass}">
+                    <div class="protocol-message protocol-message--${dirClass}${statusClass}">
                         <div class="protocol-message__meta">
                             <span class="protocol-badge ${badgeClass}">${escapeHtml(event.protocol)}</span>
-                            <span class="protocol-direction">${directionLabel(event.direction)}</span>
+                            <span class="protocol-direction">${directionLabel(event.direction, event.protocol)}</span>
                             <span class="protocol-timing">t = ${event.timing_ms} ms</span>
                         </div>
                         <h4 class="protocol-message__summary">${escapeHtml(event.summary)}</h4>

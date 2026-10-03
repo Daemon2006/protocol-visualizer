@@ -49,8 +49,17 @@
     --color-udp-tint: rgba(6, 182, 212, 0.09);
     --color-udp-border: rgba(6, 182, 212, 0.32);
 
+    /* Flow Control / Data Link layer protocol colors */
+    --color-flow: #A855F7;          /* purple: Flow Control (Stop-and-Wait / ARQ) */
+    --color-flow-hover: #9333EA;
+    --color-flow-tint: rgba(168, 85, 247, 0.10);
+    --color-flow-border: rgba(168, 85, 247, 0.35);
+
     /* Semantic status colors */
     --color-success: #22C55E;
+    --color-warning: #F59E0B;
+    --color-warning-tint: rgba(245, 158, 11, 0.10);
+    --color-warning-border: rgba(245, 158, 11, 0.35);
     --color-error: #F87171;
     --color-error-tint: rgba(248, 113, 113, 0.10);
     --color-error-border: rgba(248, 113, 113, 0.35);
@@ -685,6 +694,38 @@ a:focus-visible {
     background: var(--color-surface);
 }
 
+/* Flow Control semantic event status styles */
+.protocol-message--lost {
+    border-color: var(--color-error-border);
+    border-left-color: var(--color-error);
+    background: var(--color-error-tint);
+}
+
+.protocol-message--timeout {
+    border-color: var(--color-warning-border);
+    border-left-color: var(--color-warning);
+    background: var(--color-warning-tint);
+}
+
+.protocol-message--retransmission {
+    border-color: var(--color-flow-border);
+    border-left-color: var(--color-flow);
+    background: var(--color-flow-tint);
+}
+
+.protocol-message--duplicate,
+.protocol-message--duplicate-discard {
+    border-color: var(--color-warning-border);
+    border-left-color: var(--color-warning);
+    background: var(--color-warning-tint);
+}
+
+.protocol-message--ack-resend {
+    border-color: var(--color-flow-border);
+    border-left-color: var(--color-flow);
+    background: var(--color-flow-tint);
+}
+
 .protocol-message__meta {
     display: flex;
     align-items: center;
@@ -725,6 +766,11 @@ a:focus-visible {
 .protocol-badge--smtp {
     background: var(--color-smtp);
     color: #08101D;
+}
+
+.protocol-badge--flow {
+    background: var(--color-flow);
+    color: #FFFFFF;
 }
 
 .protocol-message__summary {
@@ -838,6 +884,11 @@ a:focus-visible {
     color: #04191F;
 }
 
+.transport-badge--flow {
+    background: var(--color-flow);
+    color: #FFFFFF;
+}
+
 .transport-badge--unknown {
     background: var(--color-border);
     color: var(--color-ink);
@@ -862,6 +913,13 @@ a:focus-visible {
     background: var(--color-udp-tint);
     border-color: var(--color-udp-border);
     border-left-color: var(--color-udp);
+}
+
+.transport-layer--flow {
+    border-left: 4px solid var(--color-flow);
+    background: var(--color-flow-tint);
+    border-color: var(--color-flow-border);
+    border-left-color: var(--color-flow);
 }
 
 .transport-layer__empty {
@@ -911,6 +969,99 @@ a:focus-visible {
     border-color: var(--color-protocol-border);
     color: var(--color-protocol);
     background: var(--color-protocol-tint);
+}
+
+.transport-endpoint--sender {
+    border-color: var(--color-activity-border);
+    color: var(--color-activity);
+    background: var(--color-activity-tint);
+}
+
+.transport-endpoint--receiver {
+    border-color: var(--color-protocol-border);
+    color: var(--color-protocol);
+    background: var(--color-protocol-tint);
+}
+
+/* Flow Control metadata badges & alerts */
+.transport-flow-badges {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.transport-flow-pill {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 600;
+    padding: 0.12rem 0.45rem;
+    border-radius: 4px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    color: var(--color-ink-soft);
+}
+
+.transport-flow-pill--timer {
+    color: var(--color-activity);
+    border-color: var(--color-activity-border);
+    background: var(--color-activity-tint);
+}
+
+.transport-flow-alert {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.45rem 0.75rem;
+    border-radius: 5px;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1.4;
+}
+
+.transport-flow-alert__icon {
+    font-size: 0.95rem;
+    flex-shrink: 0;
+}
+
+.transport-flow-alert__body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+}
+
+.transport-flow-alert__body strong {
+    font-size: 0.76rem;
+    letter-spacing: 0.02em;
+}
+
+.transport-flow-alert--lost {
+    background: var(--color-error-tint);
+    border: 1px dashed var(--color-error-border);
+    color: #FCA5A5;
+}
+
+.transport-flow-alert--timeout {
+    background: var(--color-warning-tint);
+    border: 1px dashed var(--color-warning-border);
+    color: #FCD34D;
+}
+
+.transport-flow-alert--retransmission {
+    background: var(--color-flow-tint);
+    border: 1px dashed var(--color-flow-border);
+    color: #D8B4FE;
+}
+
+.transport-flow-alert--duplicate {
+    background: var(--color-warning-tint);
+    border: 1px dashed var(--color-warning-border);
+    color: #FCD34D;
+}
+
+.transport-flow-alert--discard {
+    background: var(--color-error-tint);
+    border: 1px dashed var(--color-error-border);
+    color: #FCA5A5;
 }
 
 /* UDP note */
@@ -1013,6 +1164,55 @@ a:focus-visible {
     animation: transportFadeIn 0.25s ease-out 0.45s forwards;
 }
 
+/* Flow Control transport status indicators */
+.transport-status--flow {
+    color: var(--color-flow);
+    background: var(--color-flow-tint);
+    border: 1px solid var(--color-flow-border);
+}
+
+.transport-status--flow-ack {
+    color: var(--color-protocol);
+    background: var(--color-protocol-tint);
+    border: 1px solid var(--color-protocol-border);
+}
+
+.transport-status--lost {
+    color: var(--color-error);
+    background: var(--color-error-tint);
+    border: 1px solid var(--color-error-border);
+}
+
+.transport-status--timeout {
+    color: #FBBF24;
+    background: var(--color-warning-tint);
+    border: 1px solid var(--color-warning-border);
+}
+
+.transport-status--retransmission {
+    color: var(--color-flow);
+    background: var(--color-flow-tint);
+    border: 1px solid var(--color-flow-border);
+}
+
+.transport-status--duplicate {
+    color: #FBBF24;
+    background: var(--color-warning-tint);
+    border: 1px solid var(--color-warning-border);
+}
+
+.transport-status--discard {
+    color: var(--color-error);
+    background: var(--color-error-tint);
+    border: 1px solid var(--color-error-border);
+}
+
+.transport-status--ack-resend {
+    color: var(--color-flow);
+    background: var(--color-flow-tint);
+    border: 1px solid var(--color-flow-border);
+}
+
 /* Packet / Datagram transmission lane */
 .transport-lane {
     padding: 0.4rem 0.55rem;
@@ -1020,6 +1220,35 @@ a:focus-visible {
     background: var(--color-surface);
     border: 1px solid var(--color-border-subtle);
     overflow: hidden;
+}
+
+.transport-lane--flow {
+    border-color: var(--color-flow-border);
+}
+
+.transport-lane--lost {
+    border-color: var(--color-error-border);
+    background: rgba(248, 113, 113, 0.04);
+}
+
+.transport-lane--timeout {
+    border-color: var(--color-warning-border);
+    background: rgba(245, 158, 11, 0.04);
+}
+
+.transport-lane--retransmission {
+    border-color: var(--color-flow-border);
+    background: rgba(168, 85, 247, 0.06);
+}
+
+.transport-lane--duplicate {
+    border-color: var(--color-warning-border);
+    background: rgba(245, 158, 11, 0.04);
+}
+
+.transport-lane--discard {
+    border-color: var(--color-error-border);
+    background: rgba(248, 113, 113, 0.04);
 }
 
 .transport-packet {
@@ -1056,14 +1285,44 @@ a:focus-visible {
     color: var(--color-udp);
 }
 
+.transport-packet--flow .transport-packet__line {
+    color: var(--color-flow);
+}
+
+.transport-packet--lost .transport-packet__line {
+    color: var(--color-error);
+}
+
+.transport-packet--timeout .transport-packet__line {
+    color: var(--color-warning);
+}
+
+.transport-packet--retransmission .transport-packet__line {
+    color: var(--color-flow);
+}
+
+.transport-packet--duplicate .transport-packet__line {
+    color: var(--color-warning);
+}
+
+.transport-packet--discard .transport-packet__line {
+    color: var(--color-error);
+}
+
+.transport-packet--ack-resend .transport-packet__line {
+    color: var(--color-flow);
+}
+
 /* Directional packet animations */
 .transport-packet--udp.transport-arrow--c2s,
+.transport-packet--flow.transport-arrow--c2s,
 .transport-packet--immediate.transport-arrow--c2s {
     opacity: 0;
     animation: packetMoveRight 0.5s ease-out 0.05s forwards;
 }
 
 .transport-packet--udp.transport-arrow--s2c,
+.transport-packet--flow.transport-arrow--s2c,
 .transport-packet--immediate.transport-arrow--s2c {
     opacity: 0;
     animation: packetMoveLeft 0.5s ease-out 0.05s forwards;

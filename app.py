@@ -33,6 +33,10 @@ from simulators.dns_sim import simulate_dns
 from simulators.http_sim import simulate_http
 from simulators.smtp_sim import simulate_mail
 from simulators.streaming_sim import simulate_streaming, SUPPORTED_QUALITIES
+from simulators.flow_control_sim import (
+    simulate_stop_and_wait,
+    simulate_stop_and_wait_arq,
+)
 from live.dns_live import build_live_dns_events, DNSLookupError
 from live.http_live import build_live_http_events, HTTPRequestError
 from live.smtp_live import send_live_mail, is_smtp_configured, SMTPLiveError
@@ -369,6 +373,56 @@ def simulate_streaming_route():
     return jsonify({
         "activity": "streaming",
         "quality": quality,
+        "events": events,
+    })
+
+
+SUPPORTED_FLOW_VARIANTS = ("stop-and-wait", "stop-and-wait-arq")
+
+
+@app.route("/api/simulate/flow-control", methods=["POST"])
+def simulate_flow_control_route():
+    """
+    API endpoint for Flow Control simulation (Stop-and-Wait & Stop-and-Wait ARQ).
+
+    Expects a JSON body like:
+        {
+            "variant": "stop-and-wait",       # or "stop-and-wait-arq"
+            "frame_count": 4,                 # integer 2-6 (optional, default 4)
+            "scenario": "normal"              # "normal", "frame_loss", "ack_loss", "delayed_ack"
+        }
+
+    Validates inputs and calls the appropriate simulator module, returning
+    the ordered protocol event sequence for the visualizer.
+    """
+    data = request.get_json(silent=True) or {}
+
+    variant = (data.get("variant") or "").strip().lower()
+    if variant not in SUPPORTED_FLOW_VARIANTS:
+        return jsonify({
+            "error": f"Please choose a supported flow control variant: {', '.join(SUPPORTED_FLOW_VARIANTS)}."
+        }), 400
+
+    frame_count = data.get("frame_count", 4)
+    scenario = data.get("scenario")
+    if variant == "stop-and-wait":
+        scenario = scenario or "normal"
+    elif scenario is None:
+        scenario = "normal"
+
+    try:
+        if variant == "stop-and-wait":
+            events = simulate_stop_and_wait(frame_count)
+        else:
+            events = simulate_stop_and_wait_arq(frame_count, scenario)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    return jsonify({
+        "activity": "flow-control",
+        "variant": variant,
+        "frame_count": frame_count,
+        "scenario": scenario,
         "events": events,
     })
 

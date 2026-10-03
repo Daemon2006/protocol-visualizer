@@ -338,6 +338,239 @@ class ProtocolVisualizerTests(unittest.TestCase):
 
             self.assertEqual(len(stack), 0, f"Unclosed brackets remaining in {js_file}: {stack}")
 
+    # =========================================================================
+    # 5. FLOW CONTROL TESTS
+    # =========================================================================
+    def test_simulation_stop_and_wait(self):
+        """Stop-and-Wait must return 8 deterministic events with alternating bits 0->1->0->1."""
+        res = self.client.post(
+            "/api/simulate/flow-control",
+            json={"variant": "stop-and-wait", "frame_count": 4, "scenario": "normal"}
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertEqual(data["activity"], "flow-control")
+        self.assertEqual(data["variant"], "stop-and-wait")
+        events = data["events"]
+        self.assertEqual(len(events), 8)
+
+        expected_summaries = [
+            "Frame 0 Transmitted (Seq 0)",
+            "ACK 0 Received",
+            "Frame 1 Transmitted (Seq 1)",
+            "ACK 1 Received",
+            "Frame 2 Transmitted (Seq 0)",
+            "ACK 0 Received",
+            "Frame 3 Transmitted (Seq 1)",
+            "ACK 1 Received",
+        ]
+        self.assertEqual([e["summary"] for e in events], expected_summaries)
+
+        # Verify sequence numbers alternate 0 -> 1 -> 0 -> 1 and each frame is ACKed before the next
+        for i in range(4):
+            frame_event = events[i * 2]
+            ack_event = events[i * 2 + 1]
+            expected_seq = str(i % 2)
+
+            self.assertEqual(frame_event["direction"], "client-to-server")
+            self.assertEqual(frame_event["fields"]["Seq No"], expected_seq)
+            self.assertEqual(frame_event["fields"]["Ack No"], "-")
+
+            self.assertEqual(ack_event["direction"], "server-to-client")
+            self.assertEqual(ack_event["fields"]["Seq No"], "-")
+            self.assertEqual(ack_event["fields"]["Ack No"], expected_seq)
+
+    def test_simulation_stop_and_wait_arq_normal(self):
+        """Stop-and-Wait ARQ Normal must return 8 events with alternating sequence bits."""
+        res = self.client.post(
+            "/api/simulate/flow-control",
+            json={"variant": "stop-and-wait-arq", "frame_count": 4, "scenario": "normal"}
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertEqual(data["activity"], "flow-control")
+        self.assertEqual(data["variant"], "stop-and-wait-arq")
+        events = data["events"]
+        self.assertEqual(len(events), 8)
+
+        expected_summaries = [
+            "Frame 0 Transmitted",
+            "ACK 0 Received",
+            "Frame 1 Transmitted",
+            "ACK 1 Received",
+            "Frame 2 Transmitted",
+            "ACK 0 Received",
+            "Frame 3 Transmitted",
+            "ACK 1 Received",
+        ]
+        self.assertEqual([e["summary"] for e in events], expected_summaries)
+
+        for i in range(4):
+            frame_evt = events[i * 2]
+            ack_evt = events[i * 2 + 1]
+            exp_seq = str(i % 2)
+            self.assertEqual(frame_evt["fields"]["Seq No"], exp_seq)
+            self.assertEqual(ack_evt["fields"]["Ack No"], exp_seq)
+
+    def test_simulation_stop_and_wait_arq_frame_loss(self):
+        """Stop-and-Wait ARQ Frame Loss must show dropped frame, timeout, retransmission with same Seq, and recovery."""
+        res = self.client.post(
+            "/api/simulate/flow-control",
+            json={"variant": "stop-and-wait-arq", "frame_count": 4, "scenario": "frame_loss"}
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        events = data["events"]
+        summaries = [e["summary"] for e in events]
+
+        self.assertIn("Frame 1 Lost in Transit", summaries)
+        self.assertIn("Timeout Waiting for ACK 1", summaries)
+        self.assertIn("Retransmitting Frame 1", summaries)
+        self.assertIn("ACK 1 Received", summaries)
+
+        lost_idx = summaries.index("Frame 1 Lost in Transit")
+        timeout_idx = summaries.index("Timeout Waiting for ACK 1")
+        retrans_idx = summaries.index("Retransmitting Frame 1")
+        ack_idx = summaries.index("ACK 1 Received")
+
+        self.assertTrue(lost_idx < timeout_idx < retrans_idx < ack_idx)
+
+        lost_evt = events[lost_idx]
+        timeout_evt = events[timeout_idx]
+        retrans_evt = events[retrans_idx]
+
+        self.assertEqual(lost_evt["fields"]["Seq No"], "1")
+        self.assertIn("lost", lost_evt["fields"]["Status"].lower())
+
+        self.assertEqual(timeout_evt["fields"]["Seq No"], "1")
+        self.assertEqual(timeout_evt["fields"]["Timer"].lower(), "expired")
+
+        # Retransmission must retain the exact same Seq No: 1
+        self.assertEqual(retrans_evt["fields"]["Seq No"], "1")
+        self.assertIn("retransmitting", retrans_evt["fields"]["Status"].lower())
+
+        # Recovery succeeds: last frame is Frame 3 ACK
+        self.assertEqual(events[-1]["summary"], "ACK 1 Received")
+        self.assertEqual(events[-2]["summary"], "Frame 3 Transmitted")
+
+    def test_simulation_stop_and_wait_arq_ack_loss(self):
+        """Stop-and-Wait ARQ ACK Loss must verify lost ACK, timeout, retransmission, duplicate detection, discard, and re-ACK."""
+        res = self.client.post(
+            "/api/simulate/flow-control",
+            json={"variant": "stop-and-wait-arq", "frame_count": 4, "scenario": "ack_loss"}
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        events = data["events"]
+        summaries = [e["summary"] for e in events]
+
+        expected_subset = [
+            "ACK 1 Lost in Transit",
+            "Timeout Waiting for ACK 1",
+            "Retransmitting Frame 1",
+            "Duplicate Frame 1 Detected",
+            "Duplicate Discarded",
+            "ACK 1 Re-sent",
+            "ACK 1 Received",
+        ]
+        for item in expected_subset:
+            self.assertIn(item, summaries)
+
+        indices = [summaries.index(item) for item in expected_subset]
+        self.assertEqual(indices, sorted(indices), "Semantic events must occur in chronological order")
+
+        # Retransmitted frame retains Seq No 1
+        retrans_evt = events[summaries.index("Retransmitting Frame 1")]
+        self.assertEqual(retrans_evt["fields"]["Seq No"], "1")
+
+        # Duplicate identified as same Seq No
+        dup_evt = events[summaries.index("Duplicate Frame 1 Detected")]
+        self.assertEqual(dup_evt["fields"]["Seq No"], "1")
+        self.assertEqual(dup_evt["fields"]["Receiver State"], "DUPLICATE_DETECTED")
+
+        # Duplicate payload discarded
+        discard_evt = events[summaries.index("Duplicate Discarded")]
+        self.assertEqual(discard_evt["fields"]["Receiver State"], "DUPLICATE_DISCARDED")
+        self.assertIn("discarded", discard_evt["fields"]["Status"].lower())
+
+        # Receiver re-sends ACK 1
+        resend_evt = events[summaries.index("ACK 1 Re-sent")]
+        self.assertEqual(resend_evt["fields"]["Ack No"], "1")
+
+        # Recovery completes
+        recovery_evt = events[summaries.index("ACK 1 Received")]
+        self.assertEqual(recovery_evt["fields"]["Ack No"], "1")
+        self.assertEqual(recovery_evt["fields"]["Sender State"], "READY_FOR_NEXT")
+
+    def test_simulation_stop_and_wait_arq_delayed_ack(self):
+        """Stop-and-Wait ARQ Delayed ACK must show timeout, retransmission, duplicate handling, and recovery."""
+        res = self.client.post(
+            "/api/simulate/flow-control",
+            json={"variant": "stop-and-wait-arq", "frame_count": 4, "scenario": "delayed_ack"}
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        events = data["events"]
+        summaries = [e["summary"] for e in events]
+
+        has_timeout = any("timeout" in s.lower() or e["fields"].get("Timer") == "Expired" for e, s in zip(events, summaries))
+        has_retrans = any("retransmitting" in s.lower() for s in summaries)
+        has_duplicate = any("duplicate" in s.lower() and "detected" in s.lower() for s in summaries)
+        has_discard = any("discard" in s.lower() for s in summaries)
+        has_recovery = any("ack 1 received" in s.lower() for s in summaries)
+
+        self.assertTrue(has_timeout, "Expected timeout event in delayed ACK scenario")
+        self.assertTrue(has_retrans, "Expected retransmission event in delayed ACK scenario")
+        self.assertTrue(has_duplicate, "Expected duplicate detection in delayed ACK scenario")
+        self.assertTrue(has_discard, "Expected duplicate discard in delayed ACK scenario")
+        self.assertTrue(has_recovery, "Expected ACK recovery in delayed ACK scenario")
+
+        # Retransmission keeps Seq No 1
+        retrans_evts = [e for e in events if "retransmitting" in e["summary"].lower()]
+        self.assertTrue(len(retrans_evts) > 0)
+        self.assertEqual(retrans_evts[0]["fields"]["Seq No"], "1")
+
+    def test_flow_control_invalid_inputs(self):
+        """Verify invalid Flow Control inputs return 400 with a descriptive JSON error."""
+        invalid_payloads = [
+            {"variant": "go-back-n"},
+            {},
+            {"variant": "stop-and-wait", "frame_count": 1},
+            {"variant": "stop-and-wait", "frame_count": 7},
+            {"variant": "stop-and-wait", "frame_count": "four"},
+            {"variant": "stop-and-wait-arq", "scenario": "chaos"},
+        ]
+        for payload in invalid_payloads:
+            res = self.client.post("/api/simulate/flow-control", json=payload)
+            self.assertEqual(res.status_code, 400, f"Expected 400 for payload: {payload}")
+            self.assertTrue(res.is_json, f"Response should be JSON for payload: {payload}")
+            data = res.get_json()
+            self.assertIn("error", data, f"Missing 'error' field in response for payload: {payload}")
+            self.assertTrue(len(data["error"]) > 0)
+
+    def test_flow_control_event_schema(self):
+        """Verify Flow Control events adhere strictly to the visualizer schema and DATA LINK layer transport."""
+        for variant in ["stop-and-wait", "stop-and-wait-arq"]:
+            res = self.client.post("/api/simulate/flow-control", json={"variant": variant, "frame_count": 4})
+            self.assertEqual(res.status_code, 200)
+            events = res.get_json()["events"]
+            expected_keys = {
+                "step", "protocol", "transport", "direction",
+                "summary", "raw", "fields", "highlight", "timing_ms"
+            }
+            expected_proto = "STOP-AND-WAIT" if variant == "stop-and-wait" else "SW-ARQ"
+
+            for i, evt in enumerate(events, start=1):
+                self.assertTrue(expected_keys.issubset(evt.keys()), f"Event missing required schema keys: {evt}")
+                self.assertEqual(evt["step"], i, "Step numbers must be strictly sequential (1, 2, 3, ...)")
+                self.assertEqual(evt["protocol"], expected_proto)
+                self.assertEqual(evt["transport"], "DATA LINK", "Flow Control transport must be DATA LINK, not TCP/UDP")
+                self.assertIn(evt["direction"], ["client-to-server", "server-to-client"])
+                self.assertIsInstance(evt["fields"], dict)
+                self.assertIsInstance(evt["highlight"], list)
+                self.assertIsInstance(evt["timing_ms"], (int, float))
+
 
 if __name__ == "__main__":
     unittest.main()
+

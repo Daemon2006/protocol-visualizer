@@ -42,11 +42,14 @@ const formPanels = {
     browsing: document.getElementById("browsing-panel"),
     mail: document.getElementById("mail-panel"),
     streaming: document.getElementById("streaming-panel"),
+    flowControl: document.getElementById("flow-control-panel"),
 };
 const defaultStatusForActivity = {
     browsing: "Enter a URL and click Visit to begin.",
     mail: "Fill in To, Subject, and Body, then click Send.",
     streaming: "Choose a quality and click Play to begin.",
+    "flow-control": "Select a protocol variant and click Simulate to begin.",
+    flowControl: "Select a protocol variant and click Simulate to begin.",
 };
 
 let activeActivity = "browsing";
@@ -95,9 +98,10 @@ function switchActivity(activityName) {
         btn.setAttribute("aria-selected", isActive ? "true" : "false");
     });
     Object.entries(formPanels).forEach(([name, panel]) => {
-        panel.classList.toggle("activity-form-panel--hidden", name !== activityName);
+        const isSelected = name === activityName || (name === "flowControl" && activityName === "flow-control");
+        panel.classList.toggle("activity-form-panel--hidden", !isSelected);
     });
-    setStatus(defaultStatusForActivity[activityName]);
+    setStatus(defaultStatusForActivity[activityName] || "Select an activity to begin.");
 
     // Clear any leftover sequence from the previously selected activity
     Visualizer.reset();
@@ -650,3 +654,85 @@ streamingForm.addEventListener("submit", async (event) => {
 
     playButton.disabled = false;
 });
+
+// ---------------------------------------------------------------
+// Flow Control Activity (Stop-and-Wait and Stop-and-Wait ARQ)
+// ---------------------------------------------------------------
+const flowControlForm = document.getElementById("flow-control-form");
+const flowVariantSaw = document.getElementById("flow-variant-stop-and-wait");
+const flowVariantArq = document.getElementById("flow-variant-stop-and-wait-arq");
+const flowFrameCount = document.getElementById("flow-frame-count");
+const flowArqScenario = document.getElementById("flow-arq-scenario");
+const flowArqScenarioGroup = document.getElementById("flow-arq-scenario-group");
+const flowControlSubmit = document.getElementById("flow-control-submit");
+
+function getFlowVariant() {
+    const checked = document.querySelector('input[name="flow-variant"]:checked');
+    return checked ? checked.value : "stop-and-wait";
+}
+
+function updateFlowScenarioVisibility() {
+    const variant = getFlowVariant();
+    const isArq = variant === "stop-and-wait-arq";
+    if (flowArqScenarioGroup) {
+        flowArqScenarioGroup.style.display = isArq ? "block" : "none";
+    }
+    if (flowArqScenario) {
+        flowArqScenario.disabled = !isArq;
+    }
+}
+
+if (flowVariantSaw) {
+    flowVariantSaw.addEventListener("change", updateFlowScenarioVisibility);
+}
+if (flowVariantArq) {
+    flowVariantArq.addEventListener("change", updateFlowScenarioVisibility);
+}
+updateFlowScenarioVisibility();
+
+if (flowControlForm) {
+    flowControlForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+
+        const variant = getFlowVariant();
+        const frameCount = parseInt(flowFrameCount.value, 10) || 4;
+        const scenario = variant === "stop-and-wait-arq" ? flowArqScenario.value : "normal";
+
+        flowControlSubmit.disabled = true;
+        const variantLabel = variant === "stop-and-wait-arq" ? `Stop-and-Wait ARQ (${scenario})` : "Stop-and-Wait";
+        setStatus(`Simulating ${variantLabel} with ${frameCount} frames...`);
+        addLogEntry(`Flow Control: starting ${variant} simulation (${frameCount} frames, scenario: ${scenario})`);
+
+        try {
+            const response = await fetch("/api/simulate/flow-control", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    variant: variant,
+                    frame_count: frameCount,
+                    scenario: scenario,
+                }),
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                const errMsg = data.error || "Flow control simulation failed.";
+                setStatus(errMsg, true);
+                addLogEntry(`Error: ${errMsg}`);
+                return;
+            }
+
+            addLogEntry(`Flow Control: received ${data.events.length} events for ${data.variant}`);
+            if (activeActivity === "flow-control" || activeActivity === "flowControl") {
+                setStatus(`Flow control simulation complete \u2014 ${variantLabel} (${data.events.length} steps).`);
+                Visualizer.loadEvents(data.events);
+            }
+        } catch (err) {
+            setStatus("Could not reach the server. Is the Flask app running?", true);
+            addLogEntry(`Error: Could not reach the server.`);
+        } finally {
+            flowControlSubmit.disabled = false;
+        }
+    });
+}

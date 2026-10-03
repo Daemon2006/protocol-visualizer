@@ -68,6 +68,7 @@
                     <button type="button" class="activity-tab activity-tab--active" role="tab" aria-selected="true" aria-controls="browsing-panel" data-activity="browsing" id="tab-browsing">Browsing</button>
                     <button type="button" class="activity-tab" role="tab" aria-selected="false" aria-controls="mail-panel" data-activity="mail" id="tab-mail">Mail</button>
                     <button type="button" class="activity-tab" role="tab" aria-selected="false" aria-controls="streaming-panel" data-activity="streaming" id="tab-streaming">Streaming</button>
+                    <button type="button" class="activity-tab" role="tab" aria-selected="false" aria-controls="flow-control-panel" data-activity="flow-control" id="tab-flow-control">Flow Control</button>
                 </div>
 
                 <!-- Browsing form with Simulation/Live mode selector -->
@@ -199,6 +200,49 @@
                             <video id="live-video-player" controls playsinline></video>
                             <div id="live-video-error" class="live-video-error live-video-error--hidden"></div>
                         </div>
+                    </form>
+                </div>
+
+                <!-- Flow Control form panel (Stop-and-Wait and Stop-and-Wait ARQ) -->
+                <div class="activity-form-panel activity-form-panel--hidden" id="flow-control-panel" role="tabpanel" aria-labelledby="tab-flow-control">
+                    <form id="flow-control-form" class="activity-form" autocomplete="off">
+                        <!-- Protocol Variant Selection: Stop-and-Wait vs Stop-and-Wait ARQ -->
+                        <div class="mode-toggle" role="radiogroup" aria-label="Flow control variant">
+                            <label class="mode-toggle__option" for="flow-variant-stop-and-wait">
+                                <input type="radio" name="flow-variant" id="flow-variant-stop-and-wait" value="stop-and-wait" checked>
+                                Stop-and-Wait
+                            </label>
+                            <label class="mode-toggle__option" for="flow-variant-stop-and-wait-arq">
+                                <input type="radio" name="flow-variant" id="flow-variant-stop-and-wait-arq" value="stop-and-wait-arq">
+                                Stop-and-Wait ARQ
+                            </label>
+                        </div>
+
+                        <!-- Frame Count Selection (2 to 6 frames, default 4) -->
+                        <div class="field-group">
+                            <label for="flow-frame-count">Frame Count</label>
+                            <select id="flow-frame-count" name="frame_count">
+                                <option value="2">2 Frames</option>
+                                <option value="3">3 Frames</option>
+                                <option value="4" selected>4 Frames</option>
+                                <option value="5">5 Frames</option>
+                                <option value="6">6 Frames</option>
+                            </select>
+                        </div>
+
+                        <!-- ARQ Scenario Selection -->
+                        <div class="field-group" id="flow-arq-scenario-group">
+                            <label for="flow-arq-scenario">ARQ Scenario</label>
+                            <select id="flow-arq-scenario" name="scenario">
+                                <option value="normal" selected>Normal Delivery</option>
+                                <option value="frame_loss">Frame Loss &amp; Retransmission</option>
+                                <option value="ack_loss">ACK Loss &amp; Duplicate Detection</option>
+                                <option value="delayed_ack">Delayed ACK / Timeout</option>
+                            </select>
+                            <p class="field-note">Select an error scenario to observe timeout, retransmission, or duplicate frame handling in Stop-and-Wait ARQ.</p>
+                        </div>
+
+                        <button type="submit" id="flow-control-submit" class="activity-form__submit">Simulate Flow Control</button>
                     </form>
                 </div>
 
